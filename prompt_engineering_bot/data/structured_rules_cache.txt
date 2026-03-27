@@ -1,0 +1,71 @@
+## Structured Game Logic Engine Rules
+
+### 0. Game Environment Setup
+
+| Parameter | Value | Notes |
+| :--- | :--- | :--- |
+| **Deck Type** | Standard 52-Card Deck | Suits: {Spades, Hearts, Diamonds, Clubs}. Ranks: {1, 2, ..., 10, J, Q, K}. |
+| **Number of Players** | 2 | Player Identifiers: P1, P2. |
+| **Public Deck Existence** | YES | Source Component: `PUBLIC_DECK`. |
+| **Number of Public Piles** | 1 | Public Pile Identifier: `P1`. |
+| **Personal Draw Decks** | NO | Players do not have individual draw decks. |
+| **Initial State** | Undefined (Implicitly setup before turn sequence) | Requires card distribution rules (not specified, assumes distribution happens). |
+
+**Card Locations (State Components):**
+*   `PUBLIC_DECK`: The main draw pile.
+*   `P1`: The single Public Pile.
+*   `P1.MYCLOSED`, `P2.MYCLOSED`: Player's private, face-down cards.
+*   `P1.MYOPEN`, `P2.MYOPEN`: Player's public, face-up cards (not actively used in core actions described).
+
+**Accessibility Rules:**
+*   Cards in `MYCLOSED` are always accessible as a source for the owning player's actions.
+*   Moves from `MYCLOSED` to `MYOPEN` (internal moves) are forbidden unless explicitly defined as a mandatory action (e.g., 'opening' a card).
+
+### 1. Core Objective & Win Condition
+
+| Component | Rule |
+| :--- | :--- |
+| **Win Condition** | A player wins immediately when the count of cards in their `MYCLOSED` pile reaches zero (0). |
+
+### 2. Explicit Permissions (Draw from pile? Pass turn?)
+
+| Permission | Status | Source/Target Specification |
+| :--- | :--- | :--- |
+| **Draw from Public Pile** | YES | Allowed action specified below. |
+| **Draw from Public Deck** | YES | Explicit action defined below (`PUBLIC_DECK` to `MYCLOSED`). |
+| **Pass Turn** | NO | The rule "CAN A PLAYER PASS WITHOUT PLAYING: NO" overrides the free write mention of passing before/after actions. A player *must* attempt a legal action if one exists, or the turn ends based on failure to act. |
+
+### 3. Turn Phases
+
+The rules imply a singular action selection phase per turn.
+
+| Phase | Description |
+| :--- | :--- |
+| **Action Selection** | The active player chooses exactly one permissible action from the list in Section 4 (Legal Actions). |
+| **Resolution** | The chosen action is executed by moving the specified card(s). |
+| **Turn End** | If no legal action is available, the turn ends (or the player is stuck, based on Section 2). |
+
+### 4. Legal Actions
+
+At the start of a turn, the player *must* attempt one of the following two actions, as passing is prohibited (Section 2, Rule 4).
+
+**Action Set (Choose ONE):**
+
+| Action ID | Type | Source | Destination | Condition for Execution |
+| :--- | :--- | :--- | :--- | :--- |
+| **A1: Draw from Deck** | Draw | `PUBLIC_DECK` (Default Source) | `MYCLOSED` (Owning Player) | Always legal, provided `PUBLIC_DECK` is not empty. |
+| **A2: Play Card** | Play | `MYCLOSED` (Owning Player) | `P1` (Public Pile) | **Condition:** The rank OR the suit of the card moved from `MYCLOSED` must match the rank OR the suit of the top card currently on `P1`. |
+
+**Special Condition Definitions:**
+*   If `P1` top card is "NONE", the pile is considered empty. If the pile is empty, **no match condition** is established, making Action A2 illegal unless rules explicitly allow playing to an empty pile (which they do not). *Therefore, playing to an empty `P1` is illegal.*
+
+### 5. Constraints & Edge Cases
+
+| Constraint Type | Rule Definition |
+| :--- | :--- |
+| **Mandatory Play** | A player cannot pass their turn if an action is possible. They must choose A1 or A2 if available. |
+| **Move Validity** | A move is only legal if it is explicitly permitted by Rule 4 (Legal Actions). |
+| **Internal Moves** | Moving a card from `MYCLOSED` to `MYOPEN` is **forbidden** unless explicitly defined as an action (which it is not). |
+| **Source Specificity** | Drawing without specific instruction defaults the source to `PUBLIC_DECK` (Rule 5 of Foundations). |
+| **Empty Public Pile** | If `P1` top card is "NONE", the pile is empty. Playing a card onto an empty `P1` is illegal as the rank/suit matching condition cannot be met. |
+| **Closed Card Access** | A player can always use any card in their `MYCLOSED` pile as a source for Action A2, regardless of public visibility. |

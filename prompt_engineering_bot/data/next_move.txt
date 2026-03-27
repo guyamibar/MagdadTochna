@@ -1,0 +1,2 @@
+* src: MYCLOSED, dest: P1, card: 8 of Hearts
+* PASS

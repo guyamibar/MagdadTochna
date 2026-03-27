@@ -1,0 +1,12 @@
+Must Have Rules:
+1. NUMBER OF PLAYERS: 2
+2. IS THERE A PUBLIC DECK: YES
+3. NUMBER OF PUBLIC PILES: 1
+4. CAN A PLAYER PASS WITHOUT PLAYING: NO
+5. CAN DRAW FROM PUBLIC PILES: YES
+6. CAN DRAW FROM PUBLIC DECK: YES
+7. DO PLAYERS HAVE PERSONAL DECK: NO
+
+Free Write Rules:
+1. Win condition: you need to have 0 cards in MYCLOSED
+2. You can either draw from the deck(move from PUBLIC_DECK to MYCLOSED) or play a card (move a cards from MYCLOSED to P1) . You can only play a card if the rank or suit of the card from MYCLOSED matches the rank or suit of the card of P1).
