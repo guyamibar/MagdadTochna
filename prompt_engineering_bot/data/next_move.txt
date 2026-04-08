@@ -1,2 +1,2 @@
-* src: MYCLOSED, dest: P1, card: 8 of Hearts
+* PLAY: src: MYCLOSED, dest: P1, card: 8 of Hearts
 * PASS

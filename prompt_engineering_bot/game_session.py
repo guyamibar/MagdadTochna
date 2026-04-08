@@ -28,6 +28,10 @@ def wait_for_exit():
 
 def run_game_session():
     # Write session PID
+    # Create necessary directories
+    PROC_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
     PID_FILE.write_text(str(os.getpid()))
 
     print("🚀 --- AI Card Game Session Manager ---")

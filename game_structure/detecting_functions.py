@@ -19,11 +19,11 @@ from pupil_apriltags import Detector
 if TYPE_CHECKING:
     from card_classification import CardClassifier
 
-from apriltag import AprilTag
-from card_classification import get_cards_lables
-from card_detection import CardOutlineDetector
-from drawimages import DrawImages
-from models import (
+from game_structure.apriltag import AprilTag
+from game_structure.card_classification import get_cards_lables
+from game_structure.card_detection import CardOutlineDetector
+from game_structure.drawimages import DrawImages
+from game_structure.models import (
     AprilTagDetectionResult,
     BoundingBox,
     CardDetectionResult,

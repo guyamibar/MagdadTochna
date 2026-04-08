@@ -94,11 +94,8 @@ def test_cnn_all_cards_visual(classifier, img_path):
         
         result = classifier.classify_image(warped, check_backside=True)
         
-        # Allow AH/2H ambiguity
-        if expected["label"] == "AH" and result.label == "2H":
-            is_correct = True
-        else:
-            is_correct = result.label == expected["label"]
+
+        is_correct = result.label == expected["label"]
             
         if not is_correct: 
             all_passed = False

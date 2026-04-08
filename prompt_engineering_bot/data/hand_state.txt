@@ -1,0 +1,8 @@
+{
+    "MYCLOSED_1": null,
+    "MYCLOSED_2": null,
+    "MYCLOSED_3": null,
+    "MYCLOSED_4": null,
+    "MYCLOSED_5": null,
+    "MYCLOSED_6": null
+}

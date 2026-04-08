@@ -12,7 +12,7 @@ from typing import Optional
 
 import cv2
 import numpy as np
-from models import DetectedCard, Point2D
+from game_structure.models import DetectedCard, Point2D
 
 # Detection thresholds
 MIN_CARD_AREA: int = 500

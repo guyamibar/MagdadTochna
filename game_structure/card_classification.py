@@ -15,11 +15,13 @@ from typing import Optional, List
 import cv2
 import numpy as np
 
+try:
+    import ai_edge_litert.interpreter as tflite
+except ImportError:
+    tflite = None
 
-import ai_edge_litert.interpreter as tflite
 
-
-from models import CardClassification
+from game_structure.models import CardClassification
 
 # Path configuration
 _MODULE_DIR: Path = Path(__file__).parent
@@ -55,8 +57,16 @@ class CardClassifier:
         img_shape: int = DEFAULT_IMG_SHAPE,
     ) -> None:
         self.img_shape = img_shape
-        self.interpreter = tflite.Interpreter(model_path=(model_path), num_threads=4)
-        self.interpreter.allocate_tensors()
+        self.interpreter = None
+        if tflite is not None:
+            try:
+                self.interpreter = tflite.Interpreter(model_path=str(model_path), num_threads=4)
+                self.interpreter.allocate_tensors()
+            except Exception as e:
+                print(f"Warning: Failed to initialize TFLite interpreter: {e}")
+        else:
+            print("Warning: ai_edge_litert (tflite) not installed. CNN classification disabled.")
+            
         self.class_names = CLASS_NAMES
         
         # Backside detection state
@@ -160,6 +170,9 @@ class CardClassifier:
 
     def _run_inference(self, img_array: np.ndarray) -> np.ndarray:
         """Internal helper to get raw probabilities."""
+        if self.interpreter is None:
+            return np.zeros(len(self.class_names))
+            
         input_details = self.interpreter.get_input_details()
         output_details = self.interpreter.get_output_details()
         input_tensor = np.expand_dims(img_array, axis=0)
@@ -178,6 +191,9 @@ class CardClassifier:
         """
         if check_backside and self.is_backside(img):
             return CardClassification(label="BACK", confidence=1.0)
+
+        if self.interpreter is None:
+            return CardClassification(label="NO_TFLITE", confidence=0.0)
 
         # Orientation 1
         p1 = self._run_inference(self._preprocess(img))

@@ -16,7 +16,7 @@ from telegram.ext import (
     filters,
     ConversationHandler,
 )
-from game_engine import generate_structured_rules, RAW_RULES_FILE
+from game_engine import generate_structured_rules, RAW_RULES_FILE, ALGO_SOLVERS
 
 # Import predefined logics
 from algorithmic_solvers.games import blackjack_logic, uno_logic, war_logic
@@ -158,11 +158,16 @@ async def set_public_cards_count(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data['public_cards'] = update.message.text
     ud = context.user_data
     
-    await update.message.reply_text("🧠 AI is processing the rules and preparing a summary...")
-    
     try:
         # 1. Generate the structured rules first (Stage 1 of the game engine)
         structured = generate_structured_rules(ud['raw_rules'])
+        
+        # Check if it's an algorithmic solver - if so, skip confirmation
+        if ud['raw_rules'].strip().upper() in ALGO_SOLVERS:
+            await update.message.reply_text(f"✅ {ud['choice']} (Algorithmic) rules applied. Finalizing setup...")
+            return await bake_rules_final(update, context)
+
+        await update.message.reply_text("🧠 AI is processing the rules and preparing a summary...")
         
         # 2. Ask the AI to create a human-friendly explanation of those structured rules
         from game_engine import generate_content_with_fallback

@@ -18,9 +18,9 @@ if TYPE_CHECKING:
     from apriltag import AprilTag
     from card import Card
 
-from card_classification import CardClassifier
-from detecting_functions import read_apriltags, read_cards
-from models import CardDetectionResult, Point2D, Point3D
+from game_structure.card_classification import CardClassifier
+from game_structure.detecting_functions import read_apriltags, read_cards
+from game_structure.models import CardDetectionResult, Point2D, Point3D
 
 # Camera intrinsic matrix (3x3) from calibration
 K: list[list[float]] = [
@@ -43,7 +43,7 @@ camera_params: list[float] = [fx, fy, cx, cy]
 
 # Output dimensions for warped table view (in pixels)
 TABLE_WIDTH: int = 1000
-TABLE_HEIGHT: int = 1800
+TABLE_HEIGHT: int = 1500
 
 
 class Gsd:
@@ -155,6 +155,9 @@ class Gsd:
 
         filtered_tags = [tag for tag in result.tags if tag.id != 1]
 
+        if not filtered_tags:
+            raise ValueError("❌ No AprilTags detected! The table cannot be warped. Ensure tags are visible to the camera.")
+
         if len(filtered_tags) == 1:
             tag = filtered_tags[0]
             # Use the tag's corners instead of its center
@@ -163,12 +166,12 @@ class Gsd:
             # User requirement:
             # - Tag in bottom left
             # - Image width is 5x tag dimension (S)
-            # - Image height is 9x tag dimension (S)
+            # - Image height is 7.5x tag dimension (S)
             # - Tag is a square in transformed image
 
-            # Since TABLE_WIDTH = 1000 and TABLE_HEIGHT = 1800:
+            # Since TABLE_WIDTH = 1000 and TABLE_HEIGHT = 1500:
             # S = TABLE_WIDTH / 5 = 200
-            # S = TABLE_HEIGHT / 9 = 200
+            # S = TABLE_HEIGHT / 7.5 = 200
             # Tag dimension S = 200 pixels.
 
             s = 200.0

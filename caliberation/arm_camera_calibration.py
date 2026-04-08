@@ -1,11 +1,16 @@
+import time
+from pathlib import Path
+
 import numpy as np
 import cv2
 from typing import Tuple, Callable, List
-from game_structure.phisical_function import move_player, grab, drop, take_image
+from game_structure.phisical_function import move_player, grab, drop
 from game_structure.gsd import Gsd, camera_params
 from game_structure.models import Point2D
+from main.take_image import HighResCamera
 
-def calibrate_systems() -> Tuple[Callable[[Tuple[float, float]], Tuple[float, float]], 
+
+def calibrate_systems() -> Tuple[Callable[[Tuple[float, float]], Tuple[float, float]],
                                 Callable[[Tuple[float, float]], Tuple[float, float]],
                                 np.ndarray]:
     """
@@ -19,13 +24,13 @@ def calibrate_systems() -> Tuple[Callable[[Tuple[float, float]], Tuple[float, fl
     from game_structure.gsd import TABLE_WIDTH, TABLE_HEIGHT
     
     # Initial known position of the card in the arm's coordinate system
-    start_pos = (10.0, 10.0)
+    start_pos = (-20.0, 10.0)
     
     # Define a grid of reachable points in the arm's coordinate system for calibration
     arm_grid_points: List[Tuple[float, float]] = [
-        (10.0, 10.0), (30.0, 10.0), (50.0, 10.0),
-        (10.0, 30.0), (30.0, 30.0), (50.0, 30.0),
-        (10.0, 50.0), (30.0, 50.0), (50.0, 50.0)
+        (-20.0, 10.0), (-30.0, 10.0), (-20.0, 20.0),
+        (10.0, 30.0), (30.0, 30.0), (20.0, 20.0),
+        (30.0, 10.0)
     ]
     
     collected_arm_pts = []
@@ -43,10 +48,8 @@ def calibrate_systems() -> Tuple[Callable[[Tuple[float, float]], Tuple[float, fl
         grab()
         move_player(target_arm_pos)
         drop()
-        
-        move_player((0.0, 0.0)) 
-        
-        frame = take_image()
+        move_player((-4, 10))
+        frame = HighResCamera().take_image()
         if frame is None:
             current_card_arm_pos = target_arm_pos
             continue
@@ -54,7 +57,8 @@ def calibrate_systems() -> Tuple[Callable[[Tuple[float, float]], Tuple[float, fl
         last_frame = frame
         result = gsd.process([frame])
         all_detected = result.open_cards + result.face_down_cards
-        
+        real = [card for card in all_detected if card.center.y < 1000]
+        all_detected = real
         if not all_detected:
             current_card_arm_pos = target_arm_pos
             continue
@@ -74,6 +78,13 @@ def calibrate_systems() -> Tuple[Callable[[Tuple[float, float]], Tuple[float, fl
 
     H_cam_to_arm, _ = cv2.findHomography(cam_pts_arr, arm_pts_arr)
     H_arm_to_cam, _ = cv2.findHomography(arm_pts_arr, cam_pts_arr)
+
+    # Save calibration matrices for later use
+    data_dir = Path(__file__).parent.parent / "data"
+    data_dir.mkdir(exist_ok=True)
+    np.save(data_dir / "H_cam_to_arm.npy", H_cam_to_arm)
+    np.save(data_dir / "H_arm_to_cam.npy", H_arm_to_cam)
+    print(f"Calibration matrices saved to {data_dir}")
 
     def camera_to_arm(cam_coord: Tuple[float, float]) -> Tuple[float, float]:
         pt = np.array([cam_coord], dtype=np.float32).reshape(-1, 1, 2)
@@ -120,9 +131,7 @@ def calibrate_systems() -> Tuple[Callable[[Tuple[float, float]], Tuple[float, fl
     return camera_to_arm, arm_to_camera, warped_img
 
 if __name__ == "__main__":
-    try:
-        cam2arm, arm2cam, vis_img = calibrate_systems()
-        cv2.imwrite("data/calibration_grid.jpg", vis_img)
-        print("Annotated calibration image saved to data/calibration_grid.jpg")
-    except Exception as e:
-        print(f"Calibration aborted: {e}")
+    cam2arm, arm2cam, vis_img = calibrate_systems()
+    cv2.imwrite("data/calibration_grid.jpg", vis_img)
+    print("Annotated calibration image saved to data/calibration_grid.jpg")
+

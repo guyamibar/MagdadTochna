@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Optional
 
 import numpy as np
-from models import Point2D, Point3D
+from game_structure.models import Point2D, Point3D
 
 # Default AprilTag size in meters
 DEFAULT_TAG_SIZE: float = 0.08

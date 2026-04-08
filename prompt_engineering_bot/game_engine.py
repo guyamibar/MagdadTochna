@@ -58,6 +58,7 @@ NEXT_MOVE_FILE = Path(__file__).parent / "data" / "next_move.txt"
 
 def generate_structured_rules(raw_rules_input):
     """Stage 1: Transform human rules into machine-structured logic."""
+    RAW_RULES_FILE.write_text(raw_rules_input, encoding="utf-8")
     clean_rules = raw_rules_input.strip().upper()
     if clean_rules in ALGO_SOLVERS:
         STRUCTURED_RULES_FILE.write_text(clean_rules, encoding="utf-8")
