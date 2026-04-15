@@ -5,7 +5,7 @@ import numpy as np
 import cv2
 from typing import Tuple, Callable, List
 from game_structure.phisical_function import grab, drop
-from arduino_control.moveitmoveit import move_to
+from arduino_control.moveitmoveit import move_to, grabber_lazer
 from game_structure.gsd import Gsd, camera_params
 from main.take_image import HighResCamera
 
@@ -118,51 +118,30 @@ def calibrate_systems() -> Tuple[Callable[[Tuple[float, float]], Tuple[float, fl
     last_frame = None
     for target_arm_pos in arm_grid_points:
         print(f"Targeting Arm Position: {target_arm_pos}")
-        move_to((10, 25))
-        move_to(current_card_arm_pos)
-        grab()
         move_to(target_arm_pos)
-        drop()
-        move_to((10, 25))
-        move_to((-1, 10))
-        frame = HighResCamera().take_image()
+        cords, frame = HighResCamera().get_laser_location()
         if frame is None:
-            current_card_arm_pos = target_arm_pos
-            continue
-        
-        last_frame = frame
-        result = gsd.process([frame])
-        all_detected = result.open_cards + result.face_down_cards
-        real = []
-        for card in all_detected:
-            if card.center.y < 1000:
-                if card.center.y < 130 and (card.center.x < 550 and card.center.x > 250):
-                    continue
-                real.append(card)
-
-        all_detected = real
-        if not all_detected:
             current_card_arm_pos = target_arm_pos
             continue
 
         data_dir = Path(__file__).parent.parent / "data"
         data_dir.mkdir(exist_ok=True)
-        cv2.imwrite(str(data_dir / f"arm_camera_{target_arm_pos}1.jpg"), frame)
-        cv2.imwrite(str(data_dir / f"arm_camera_{target_arm_pos}2.jpg"), result.annotated_image)
+        cv2.imwrite(str(data_dir / f"arm_camera_{target_arm_pos}.jpg"), frame)
 
-        detected_card = all_detected[0]
-        print(f"Detected Card Position: {detected_card.center}, Card: {detected_card.label}")
-        print(f"Chosen out of {len(all_detected)}")
-        cam_x, cam_y = detected_card.center.x, detected_card.center.y
+        cam_x, cam_y = cords[0], cords[1]
         
         collected_arm_pts.append(target_arm_pos)
         collected_cam_pts.append((cam_x, cam_y))
         current_card_arm_pos = target_arm_pos
+        last_frame = frame
 
     return calibrate_from_points(collected_arm_pts, collected_cam_pts, last_frame)
 
 if __name__ == "__main__":
+    ar = [(), (655, 234), (658, 429), (), (), (), ()]
+    grabber_lazer(True)
     _, _, vis_img = calibrate_systems()
+    grabber_lazer(False)
     data_dir = Path(__file__).parent.parent / "data"
     data_dir.mkdir(exist_ok=True)
     cv2.imwrite(data_dir / "calibration_vis.jpg", vis_img)

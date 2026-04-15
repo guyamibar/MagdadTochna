@@ -35,7 +35,7 @@ class CardClassifier:
         self.suit_labels = self._load_labels(f"{suit_model_path}.labels.txt")
         
         # Perspective transform parameters (matching extract_corners.py)
-        self.pts_src = np.array([[150, 170], [230, 130], [310, 320], [230, 360]], dtype=np.float32)
+        self.pts_src = np.array([[180, 130], [250, 90], [355, 295], [290, 330]], dtype=np.float32)
         self.width = int((np.linalg.norm(self.pts_src[0] - self.pts_src[1]) + np.linalg.norm(self.pts_src[2] - self.pts_src[3])) / 2)
         self.height = int((np.linalg.norm(self.pts_src[1] - self.pts_src[2]) + np.linalg.norm(self.pts_src[0] - self.pts_src[3])) / 2)
         self.pts_dst = np.array([[0, 0], [self.width, 0], [self.width, self.height], [0, self.height]], dtype=np.float32)
@@ -64,23 +64,22 @@ class CardClassifier:
         rank_part = mirrored[0:110, :]
         suit_part = mirrored[110:, :]
         
-        # 4. Resize and Grayscale for Rank
-        # Convert Rank to Grayscale (consistent with new model architecture)
-        rank_gray = cv2.cvtColor(rank_part, cv2.COLOR_RGB2GRAY)
-        
-        rank_input = cv2.resize(rank_gray, (128, 128), interpolation=cv2.INTER_AREA)
+        # 4. Resize
+        rank_input = cv2.resize(rank_part, (128, 128), interpolation=cv2.INTER_AREA)
         suit_input = cv2.resize(suit_part, (128, 128), interpolation=cv2.INTER_AREA)
         
-        # 5. Standardize (Zero-mean, Unit-variance) and expand dims for batch
-        # This makes the model robust to lighting variations
+        # 5. Standardization
         rank_input = rank_input.astype(np.float32)
         suit_input = suit_input.astype(np.float32)
         
-        rank_input = (rank_input - np.mean(rank_input)) / (np.std(rank_input) + 1e-7)
+        # Rank: MobileNetV2 expects [-1, 1] scaling
+        rank_input = (rank_input / 127.5) - 1.0
+        
+        # Suit: Standard zero-mean unit-variance
         suit_input = (suit_input - np.mean(suit_input)) / (np.std(suit_input) + 1e-7)
         
-        # Add channel dimension for rank (batch, h, w, 1)
-        rank_input = np.expand_dims(np.expand_dims(rank_input, axis=-1), axis=0)
+        # Add batch dimension
+        rank_input = np.expand_dims(rank_input, axis=0)
         suit_input = np.expand_dims(suit_input, axis=0)
         
         return rank_input, suit_input
@@ -119,8 +118,8 @@ def main():
     # Extraction area points for visualization
     pts_display = classifier.pts_src.astype(np.int32).reshape((-1, 1, 2))
     
-    # Open camera
-    cap = cv2.VideoCapture(0)
+    # Open camera (using index 0 as per camera_inference2.py)
+    cap = cv2.VideoCapture(1)
     if not cap.isOpened():
         print("Error: Could not open camera.")
         return
@@ -145,7 +144,7 @@ def main():
         # Run inference every 3 seconds
         if current_time - last_inference_time >= inference_interval:
             try:
-                # Get prediction
+                # Get prediction using infere()
                 result = classifier.infere(frame)
 
                 # Create timestamped filename
@@ -165,8 +164,9 @@ def main():
                 rank_crop = cv2.cvtColor(mirrored[0:110, :], cv2.COLOR_RGB2BGR)
                 suit_crop = cv2.cvtColor(mirrored[110:, :], cv2.COLOR_RGB2BGR)
 
-                #cv2.imwrite(str(output_dir / f"capture_{timestamp}_{label_str}_rank.jpg"), rank_crop)
-                #cv2.imwrite(str(output_dir / f"capture_{timestamp}_{label_str}_suit.jpg"), suit_crop)
+                # Commented out crops saving as per camera_inference2.py
+                # cv2.imwrite(str(output_dir / f"capture_{timestamp}_{label_str}_rank.jpg"), rank_crop)
+                # cv2.imwrite(str(output_dir / f"capture_{timestamp}_{label_str}_suit.jpg"), suit_crop)
 
                 result_text = f"Saved: {result['rank']} of {result['suit']}"
                 print(f"Classification: {result['rank']} of {result['suit']} -> Saved to {frame_filename}")

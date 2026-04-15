@@ -86,7 +86,7 @@ def __alpha_beta(p: Position) -> Tuple[float, float]:
 
 def __stepper_angle(angle: float) -> int:
     """Convert raw angle (radians) to stepper motor steps."""
-    return int(angle * -3 / 2 + 135)
+    return int(angle * -3 / 2)
 
 def __get_grabbler_angle(position: int) -> float:
     theta_sep = math.acos((b**2+a**2-math.dist(position, s_r)**2)/(2*a*b))
@@ -96,7 +96,7 @@ def __get_grabbler_angle(position: int) -> float:
 
 #---------------------------arms funcs-------------------------
 DEFAULT_POS: Position = (-4, 10)
-ROTATOR_POS: Position = (14.5, 7.5)
+ROTATOR_POS: Position = (15, 8)
 CLOSE_CENTER_POS: Position = (3.5, 7.5)
 CLOSE_RIGHT_POS: Position = (-25, 7.5)
 FAR_CENTER_POS: Position = (3.5, 12)
@@ -118,8 +118,8 @@ def __turn_motors(left_angle: float, right_angle: float) -> None:
 
     Angles are expected in degrees.
     """
-    right_servo_angle = __stepper_angle(right_angle)
-    left_servo_angle = __stepper_angle(left_angle)
+    right_servo_angle = __stepper_angle(right_angle - 162)
+    left_servo_angle = __stepper_angle(left_angle - 237)
     print(f"Right Motor Angle: {right_servo_angle}, Left Motor Angle: {left_servo_angle}")
     send_command(2, int(left_servo_angle), int(right_servo_angle))
 
@@ -145,14 +145,14 @@ def grabber_catch() -> None:
 def grabber_release() -> None:
     """Raise the grabber to the up position."""
     print("Raising grabber!")
-    __grabber_set(145)
-    time.sleep(2)
+    __grabber_set(150)
+    time.sleep(4)
     grabber_rest()
 
 def grabber_rest() -> None:
     """Rest the grabber to the resting position."""
     print("Resting grabber!")
-    __grabber_set(130)
+    __grabber_set(133)
 
 def grab() -> None:
     """Perform a grab sequence: lower, wait, then partially lift."""
@@ -166,23 +166,22 @@ def grab_from_rotator() -> None:
     print("Grabbing from rotator!")
     __grabber_set(110)
     grabber_rest()
-
-def grabber_lazer(lazer_state: bool) -> None:
-    """Turn the grabber's lazer on or off."""
-    print(f"Turning grabber lazer {'ON' if lazer_state else 'OFF'}")
-    send_command(9, 1 if lazer_state else 0)
-
 #--------------------------- Grabber funcs -------------------------
 
 def rotator_rotate(angle: degrees) -> None:
     """Rotate the grabber to a specific angle."""
     print(f"Rotating grabber to angle: {angle}")
-    send_command(6, int(angle), 0)
+    send_command(6, int(angle * 3 / 2), 0)
+
+def flipper_rotate(angle: degrees) -> None:
+    """Rotate the flipper to a specific angle."""
+    print(f"Rotating flipper to angle: {angle}")
+    send_command(7, int(270 - angle), 0)
 
 def __get_required_rotation(card_pos: Position, card_orientation: degrees) -> degrees:
     grabber_rotation =  __get_grabbler_angle(card_pos) - __get_grabbler_angle(ROTATOR_POS)
     required_rotation = card_orientation - grabber_rotation
-    return required_rotation
+    return (360 + required_rotation) % 180
 
 def pos_to_rotator(required_rotation: degrees) -> None:
     rotator_rotate(required_rotation)
@@ -208,11 +207,21 @@ def put_card_in_rotator(card_pos: Position, card_orientation: degrees) -> None:
     """Move a card to the rotator and rotate it to the correct orientation."""
     print(f"Putting card in rotator from position: {card_pos} with orientation: {card_orientation}")
     required_orientation = __get_required_rotation(card_pos, card_orientation)
-    move_to(card_pos)
-    grab()
-    pos_to_rotator(required_orientation)
+    grabber_rest()
+    move_to((-10, 10))
+    grabber_catch()
+    time.sleep(2)
+    grabber_rest()
+    move_to((20, 20))
+    p1: Position = (ROTATOR_POS[0] + math.cos(math.radians(required_orientation)) * 10, ROTATOR_POS[1] + math.sin(math.radians(required_orientation)) * 10)
+    rotator_rotate(required_orientation)
+    move_to(p1)
+    for i in range(0, 3):
+        move_to((p1[0] * (1 - i/5) + i/5 * ROTATOR_POS[0], (p1[1] * (1 - i/5) + i/5 * ROTATOR_POS[1])))
+    move_to(ROTATOR_POS)
     grabber_release()
-    left_exit() if required_orientation < 90 else right_exit()
+    move_to(p1)
+    time.sleep(1)
 
 def take_card_from_rotator(card_pos: Position, card_orientation: degrees) -> None:
     """Take a card from the rotator and move it to the specified position."""
@@ -224,7 +233,10 @@ def take_card_from_rotator(card_pos: Position, card_orientation: degrees) -> Non
     move_to(card_pos)
     grabber_release()
 
-
+def grabber_lazer(lazer_state: bool) -> None:
+    """Turn the grabber's lazer on or off."""
+    print(f"Turning grabber lazer {'ON' if lazer_state else 'OFF'}")
+    send_command(9, 1 if lazer_state else 0)
 #-------------------------------actions ----------------------------------
 
 def move_card(card_pos: Position, target_pos: Position) -> None:
@@ -251,9 +263,14 @@ if __name__ == "__main__":
         #grab()
         #grabber_catch()
         #grabber_release()
-        grabber_lazer(False)
-
-        #print("your fon linging bring bring bring")
+        #grabber_rest()
+        grabber_lazer(True)
+        #move_to((20, 20))
+        #move_to(ROTATOR_POS)
+        #put_card_in_rotator((10, 10), 0)
+        #__grabber_set(30)
+        
+        print("your fon linging bring bring bring")
     finally:
         if _sock:
             _sock.close()

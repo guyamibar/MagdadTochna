@@ -52,23 +52,22 @@ class CardClassifier:
         rank_part = mirrored[0:110, :]
         suit_part = mirrored[110:, :]
         
-        # 4. Resize and Grayscale for Rank
-        # Convert Rank to Grayscale (consistent with new model architecture)
-        rank_gray = cv2.cvtColor(rank_part, cv2.COLOR_RGB2GRAY)
-        
-        rank_input = cv2.resize(rank_gray, (128, 128), interpolation=cv2.INTER_AREA)
+        # 4. Resize
+        rank_input = cv2.resize(rank_part, (128, 128), interpolation=cv2.INTER_AREA)
         suit_input = cv2.resize(suit_part, (128, 128), interpolation=cv2.INTER_AREA)
         
-        # 5. Standardize (Zero-mean, Unit-variance) and expand dims for batch
-        # This makes the model robust to lighting variations
+        # 5. Standardization
         rank_input = rank_input.astype(np.float32)
         suit_input = suit_input.astype(np.float32)
         
-        rank_input = (rank_input - np.mean(rank_input)) / (np.std(rank_input) + 1e-7)
+        # Rank: MobileNetV2 expects [-1, 1] scaling
+        rank_input = (rank_input / 127.5) - 1.0
+        
+        # Suit: Standard zero-mean unit-variance
         suit_input = (suit_input - np.mean(suit_input)) / (np.std(suit_input) + 1e-7)
         
-        # Add channel dimension for rank (batch, h, w, 1)
-        rank_input = np.expand_dims(np.expand_dims(rank_input, axis=-1), axis=0)
+        # Add batch dimension
+        rank_input = np.expand_dims(rank_input, axis=0)
         suit_input = np.expand_dims(suit_input, axis=0)
         
         return rank_input, suit_input

@@ -116,16 +116,6 @@ class HighResCamera:
                 print("❌ [Camera] capture_array returned None.")
             else:
                 print("✅ [Camera] Capture success!")
-                save_path = r"/home/lahav/MagdadTochna/main/tablerun.jpg"
-                if save_path:
-                    try:
-                        # Picamera2 usually returns RGB, but cv2 saves as BGR.
-                        # Convert it so the colors are correct in the saved file.
-                        img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                        cv2.imwrite(save_path, img_bgr)
-                        print(f"💾 [Camera] Image successfully saved to: {save_path}")
-                    except Exception as e:
-                        print(f"❌ [Camera] Failed to save image: {e}")
             return img
 
         except Exception as e:
@@ -133,12 +123,153 @@ class HighResCamera:
             traceback.print_exc()
             return None
 
+    def take_laser_image(self, exposure_time=1500, analog_gain=1.0):
+        """
+        Captures an image with very low exposure, isolating bright light sources like lasers.
+        exposure_time: in microseconds (e.g. 2000 = 2ms). Adjust based on room lighting.
+        """
+        if not self._started:
+            if not self.start():
+                print("⚠️ [Camera] Returning dummy image.")
+                return np.zeros((3840, 4500, 3), dtype=np.uint8)
+
+        try:
+
+            print("🔍 [Camera] Focusing...")
+            self.picam2.autofocus_cycle()
+            print(f"🔴 [Camera] Setting manual exposure (Time: {exposure_time}µs, Gain: {analog_gain})...")
+            # Disable Auto Exposure and enforce manual limits
+            self.picam2.set_controls({
+                "AeEnable": False,
+                "ExposureTime": exposure_time,
+                "AnalogueGain": analog_gain
+            })
+
+            # Allow a tiny pause for the sensor to apply the new exposure settings
+            time.sleep(1)
+
+
+            print("📸 [Camera] Capturing dark image for laser detection...")
+            # Explicitly request the 'main' stream to guarantee the 4500x3840 resolution
+            img = self.picam2.capture_array('main')
+
+            # Immediately restore Auto Exposure so take_image() works normally next time
+            print("🔄 [Camera] Restoring Auto Exposure...")
+            self.picam2.set_controls({"AeEnable": True})
+
+            # Allow the camera sensor pipeline to switch back to auto before returning
+            time.sleep(0.2)
+
+            if img is not None:
+                if not img.flags['C_CONTIGUOUS']:
+                    img = np.ascontiguousarray(img)
+                # Print the resolution to the console to verify it matches take_image()
+                print(f"📐 [Camera] Laser image resolution confirmed: {img.shape[1]}x{img.shape[0]}")
+            return img
+
+        except Exception as e:
+            print(f"❌ [Camera] Laser capture error: {e}")
+            traceback.print_exc()
+            # Failsafe: Attempt to restore Auto Exposure if a crash occurred
+            try:
+                self.picam2.set_controls({"AeEnable": True})
+            except Exception:
+                pass
+            return None
+
+    def get_laser_location(self):
+        img = HighResCamera().take_laser_image()
+        cv2.imwrite("try.jpg", img)
+        gsd = Gsd(camera_params=camera_params)
+        img = gsd.warp_table_exact(img)
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+        # 2. Define the bounds for the color red.
+        # In OpenCV, Hue goes from 0 to 179.
+        # Red is tricky because it sits at the very edge of the Hue circle,
+        # meaning it wraps around from 170-179 back to 0-10.
+
+        # Lower red range (Hue 0 to 10)
+        lower_red_1 = np.array([0, 120, 70])
+        upper_red_1 = np.array([10, 255, 255])
+
+        # Upper red range (Hue 170 to 180)
+        lower_red_2 = np.array([170, 50, 30])
+        upper_red_2 = np.array([180, 255, 255])
+
+        # 3. Create masks for both red ranges
+        mask1 = cv2.inRange(hsv, lower_red_1, upper_red_1)
+        mask2 = cv2.inRange(hsv, lower_red_2, upper_red_2)
+
+        # 4. Combine the two masks (Pixel is red if it's in mask1 OR mask2)
+        final_red_mask = cv2.bitwise_or(mask1, mask2)
+
+        # 5. Apply the mask to the original image
+        # This keeps original pixel colors where the mask is white (255)
+        # and turns them black (0) where the mask is black.
+        red_only_image = cv2.bitwise_and(img, img, mask=final_red_mask)
+
+        contours, _ = cv2.findContours(final_red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.imwrite("laser_mask1.jpg", final_red_mask)
+        print("saved")
+        # If the image is completely black (no laser detected)
+        if not contours:
+            print("⚠️ [Laser] No light sources detected in the image.")
+            return None
+
+        # 2. Find the largest contour (assuming the laser is the biggest bright spot)
+        largest_contour = max(contours, key=cv2.contourArea)
+
+
+
+
+        # 3. Calculate the center of the shape using "Image Moments"
+        # Moments are just a mathematical way to find the center of mass of a cluster of pixels
+        M = cv2.moments(largest_contour)
+
+        # Prevent division by zero (happens if the contour is somehow a single pixel line)
+        if M["m00"] == 0:
+            return None
+
+        # Calculate the exact x and y coordinates
+        center_x = int(M["m10"] / M["m00"])
+        center_y = int(M["m01"] / M["m00"])
+
+        # annotate point on image
+        # 1. Choose a highly visible color (BGR format). Green: (0, 255, 0)
+        marker_color = (0, 255, 0)
+
+        # 2. Draw a circle around the laser
+        # Arguments: image, center, radius, color, thickness
+        cv2.circle(img, (center_x, center_y), radius=20, color=marker_color, thickness=2)
+
+        # 3. Draw a precise crosshair exactly at the center point
+        # Arguments: image, position, color, markerType, markerSize, thickness
+        cv2.drawMarker(img, (center_x, center_y), color=marker_color,
+                       markerType=cv2.MARKER_CROSS, markerSize=30, thickness=2)
+
+        # 4. (Optional) Add text showing the exact coordinates
+        text = f"Laser: ({center_x}, {center_y})"
+        # Arguments: image, text, bottom-left corner, font, scale, color, thickness
+        cv2.putText(img, text, (center_x + 25, center_y - 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, marker_color, 2)
+
+        return (center_x, center_y), img
+
+
 def take_image():
     """Standalone wrapper function for backward compatibility."""
     camera = HighResCamera()
-    return camera.take_image()
+    img = camera.take_image()
+
+
+
 
 if __name__ == "__main__":
+    cord, frame = HighResCamera().get_laser_location()
+    cv2.imwrite("test.jpg", frame)
+    print(f"the lazer location is {cord}")
+    print("saved")
     from pathlib import Path
     ROOT_DIR = Path(__file__).parent.parent
     H_PATH = ROOT_DIR / "data" / "H_cam_to_arm.npy"
@@ -179,3 +310,4 @@ if __name__ == "__main__":
                 print(f"   Camera: ({cam_x:.1f}, {cam_y:.1f})")
                 print(f"   Arm:    ({arm_x:.2f}, {arm_y:.2f})")
     camera.stop()
+

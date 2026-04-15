@@ -155,6 +155,7 @@ class Gsd:
         Note:
             Excludes AprilTag with ID 1 (reserved for other purposes).
         """
+        cv2.imwrite("debug_apriltags.jpg", frame)  # Debug: Save the input frame for AprilTag detection
         result = read_apriltags(frame, camera_params)
 
         filtered_tags = [tag for tag in result.tags if tag.id != 1]
@@ -301,7 +302,11 @@ class Gsd:
 
 
 if __name__ == "__main__":
+    fram = cv2.imread("../main/test.jpg")
+
     gsd = Gsd(camera_params)
+    new = gsd.warp_table_exact(fram)
+    cv2.imwrite("../main/test2.jpg", new)
     im = cv2.imread("data/test tables/img1.png")
     result = gsd.process([im])
     if result.open_cards:

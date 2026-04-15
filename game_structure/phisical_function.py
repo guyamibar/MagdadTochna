@@ -1,5 +1,13 @@
 import numpy as np
 from typing import Union, Tuple
+import sys
+from pathlib import Path
+
+# Ensure repository root is on sys.path when running this module directly.
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 from arduino_control import moveitmoveit
 import cv2
 import time
@@ -7,7 +15,6 @@ try:
     from picamera2 import Picamera2
 except ImportError:
     Picamera2 = None
-from pathlib import Path
 import arduino_control.dealer_communication as dealer
 from game_structure.models import Point2D
 from game_structure.card_classification import CardClassifier
@@ -182,3 +189,11 @@ def look_at_card() -> str:
     rank = card["rank"]
     suit = suits[card['suit']]
     return f"{rank} of {suit}"
+
+
+if __name__ == "__main__":
+    # This block is for testing purposes. It will be ignored when you import this file elsewhere.
+    try:
+        put_card_in_basket((10, 10), 0)
+    except Exception as e:
+        print(f"An error occurred during testing: {e}")

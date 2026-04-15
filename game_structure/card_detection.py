@@ -169,11 +169,13 @@ class CardOutlineDetector:
 
         return (int(px), int(py))
 
+    @staticmethod
     def calculate_angle(line: Tuple[int, int, int, int]) -> float:
         """Calculates the angle of a line in degrees."""
         x1, y1, x2, y2 = line
         return np.degrees(np.arctan2(y2 - y1, x2 - x1)) % 180
 
+    @staticmethod
     def calculate_line_length(line: Tuple[int, int, int, int]) -> float:
         """Calculates the physical length of a line segment."""
         return np.hypot(line[2] - line[0], line[3] - line[1])
@@ -209,7 +211,34 @@ class CardOutlineDetector:
 
         return dist < dist_tol
 
+    @staticmethod
+    def merge_lines(line1: Tuple[int, int, int, int], line2: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+        """
+        Merges two collinear line segments into one long line by finding
+        the two endpoints that are furthest apart.
+        """
+        pts = [
+            (line1[0], line1[1]),
+            (line1[2], line1[3]),
+            (line2[0], line2[1]),
+            (line2[2], line2[3])
+        ]
+
+        max_dist = 0.0
+        best_pair = (pts[0], pts[1])
+
+        # Check the distance between all possible pairs of endpoints
+        for i in range(4):
+            for j in range(i + 1, 4):
+                d = np.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1])
+                if d > max_dist:
+                    max_dist = d
+                    best_pair = (pts[i], pts[j])
+
+        return (int(best_pair[0][0]), int(best_pair[0][1]), int(best_pair[1][0]), int(best_pair[1][1]))
+
     # --- Main Filtering Function ---
+
     @staticmethod
     def find_corners_via_intersections(
             contour: np.ndarray,
@@ -238,31 +267,106 @@ class CardOutlineDetector:
                 x1, y1, x2, y2 = line[0]
                 cv2.line(debug_raw, (x1, y1), (x2, y2), (0, 0, 255), 2)
 
-        flat_lines = [line[0] for line in lines]
+        merged_edges = [line[0] for line in lines]
 
-        # 3. Sort all lines by length (Longest first)
-        flat_lines.sort(key=CardOutlineDetector.calculate_line_length, reverse=True)
+        # 3. Sort all lines by length (Longest first) - Keep this as is
+        merged_edges.sort(key=CardOutlineDetector.calculate_line_length, reverse=True)
 
-        # 4. Filter for the 4 strongest distinct sides
+        # 4. Iterative Candidate Search for two parallel pairs
+        def get_angle_diff(a1, a2):
+            diff = abs(a1 - a2)
+            return min(diff, 180 - diff)
+
         representative_lines = []
-        for line in flat_lines:
-            is_novel = True
 
-            # Check against the lines we've already kept
-            for rep_line in representative_lines:
-                if CardOutlineDetector.are_lines_collinear(rep_line, line):
-                    # This line is just a fragment of an edge we already have
-                    is_novel = False
-                    break
+        # We loop through all merged edges, trying each as the primary 'seed' (line1)
+        for i in range(len(merged_edges)):
+            line1 = merged_edges[i]
+            angle1 = CardOutlineDetector.calculate_angle(line1)
 
-            if is_novel:
-                representative_lines.append(line)
+            # --- Step A: Find a parallel partner for line1 ---
+            line2 = None
+            for j in range(len(merged_edges)):
+                if i == j: continue  # Don't compare a line to itself
 
-            if len(representative_lines) == 4:
-                break  # We found our 4 sides!
+                potential_l2 = merged_edges[j]
+                angle2 = CardOutlineDetector.calculate_angle(potential_l2)
 
-        # Sort the final 4 lines by angle so we intersect adjacent sides correctly
-        representative_lines.sort(key=CardOutlineDetector.calculate_angle)
+                # Parallel check
+                if get_angle_diff(angle1, angle2) < 15:
+                    # Distance check (ensure they aren't the same physical edge)
+                    if not CardOutlineDetector.are_lines_collinear(line1, potential_l2, dist_tol=30):
+                        line2 = potential_l2
+                        # Store index j so we can skip it later
+                        current_j = j
+                        break
+
+            if line2 is None:
+                continue  # This seed line has no parallel partner; try the next seed
+
+            # --- Step B: Find a perpendicular pair (Axis B) ---
+            line3 = None
+            line4 = None
+
+            # Search for the first perpendicular line
+            for k in range(len(merged_edges)):
+                if k == i or k == current_j: continue
+
+                potential_l3 = merged_edges[k]
+                angle3 = CardOutlineDetector.calculate_angle(potential_l3)
+
+                # Perpendicular check (~90 degrees)
+                if 70 < get_angle_diff(angle1, angle3) < 110:
+                    line3 = potential_l3
+
+                    # Now find a parallel partner for line3
+                    for m in range(len(merged_edges)):
+                        # Index comparison fixes the NumPy ValueError
+                        if m == i or m == current_j or m == k: continue
+
+                        potential_l4 = merged_edges[m]
+                        angle4 = CardOutlineDetector.calculate_angle(potential_l4)
+
+                        # Parallel to Axis B check
+                        if get_angle_diff(angle3, angle4) < 15:
+                            if not CardOutlineDetector.are_lines_collinear(line3, potential_l4, dist_tol=30):
+                                line4 = potential_l4
+                                break
+
+                    if line4 is not None:
+                        break  # Found a complete Axis B!
+
+            # --- Step C: Final Validation ---
+            if all(l is not None for l in [line1, line2, line3, line4]):
+                representative_lines = [line1, line2, line3, line4]
+                break  # Success! We found a valid rectangular set. Stop searching.
+
+        # If we exit the loop and representative_lines is empty, no valid card was found
+        if len(representative_lines) < 4:
+            return None
+
+        # --- NEW RADIAL SORTING LOGIC ---
+        # Find the midpoints of the 4 lines
+        midpoints = []
+        for line in representative_lines:
+            x1, y1, x2, y2 = line
+            midpoints.append(((x1 + x2) / 2.0, (y1 + y2) / 2.0))
+
+        # Find the rough center of the card (average of midpoints)
+        center_x = sum(p[0] for p in midpoints) / 4.0
+        center_y = sum(p[1] for p in midpoints) / 4.0
+
+        # Helper to get the radial angle of a line's midpoint relative to the center
+        def get_radial_angle(line: tuple[int, int, int, int]) -> float:
+            x1, y1, x2, y2 = line
+            mid_x = (x1 + x2) / 2.0
+            mid_y = (y1 + y2) / 2.0
+            return float(np.arctan2(mid_y - center_y, mid_x - center_x))
+
+        # Sort lines radially around the perimeter.
+        # This guarantees they are in adjacent sequence!
+        representative_lines.sort(key=get_radial_angle)
+        # --------------------------------
 
         # DEBUG: Draw filtered lines
         if debug_filtered is not None:
@@ -290,7 +394,114 @@ class CardOutlineDetector:
             return np.array(corners, dtype=np.int32).reshape(4, 2)
 
         return None
+    # --- Main Pipeline ---
+    @staticmethod
+    def get_card_outlines(
+            img: np.ndarray,
+            include_img: bool = False,
+            debug_mode: bool = True  # Set to False in production
+    ) -> list[DetectedCard]:
+        """
+        Detect card outlines with primary intersection strategy and built-in debug visualization.
+        """
+        original = img.copy()
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
+        # Apply Gaussian blur
+        blur = cv2.GaussianBlur(gray, (5, 5), 1.2)
+
+        # Perform Canny edge detection
+        edges = cv2.Canny(blur, 100, 200)
+        cv2.imshow("Edges", edges)
+        # Morphological Closing
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        closed_edges = cv2.dilate(edges, kernel, iterations=1)
+        cv2.imshow("Closed Edges", closed_edges)
+        cv2.waitKey(0)
+        # Find contours
+        contours, _ = cv2.findContours(
+            closed_edges,
+            cv2.RETR_LIST,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+
+        # Setup debug canvases
+        debug_contours = original.copy()
+        debug_raw = original.copy()
+        debug_filtered = original.copy()
+        debug_final = original.copy()  # ADDED: Canvas for final detections
+
+        # Draw all raw contours in green
+        if debug_mode:
+            cv2.drawContours(debug_contours, contours, -1, (0, 255, 0), 2)
+
+        detected_cards: list[DetectedCard] = []
+
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < MIN_CARD_AREA:
+                continue
+
+            # Pass the debug canvases down to the intersection logic
+            found_corners = CardOutlineDetector.find_corners_via_intersections(
+                contour,
+                closed_edges,
+                debug_raw=debug_raw if debug_mode else None,
+                debug_filtered=debug_filtered if debug_mode else None
+            )
+
+            if found_corners is not None:
+                ordered_corners = CardOutlineDetector.order_points(found_corners)
+
+                cx = int(np.mean(ordered_corners[:, 0]))
+                cy = int(np.mean(ordered_corners[:, 1]))
+
+                warped_image: Optional[np.ndarray] = None
+                if include_img:
+                    warped_image = CardOutlineDetector.warp_card(original, ordered_corners)
+
+                # ADDED: Draw the final confirmed results on the debug canvas
+                if debug_mode:
+                    # Draw the bounding polygon (thick green line)
+                    cv2.polylines(debug_final, [ordered_corners], isClosed=True, color=(0, 255, 0), thickness=3)
+                    # Mark the center point (red dot)
+                    cv2.circle(debug_final, (cx, cy), 5, (0, 0, 255), -1)
+                    # Label the card number
+                    cv2.putText(
+                        debug_final,
+                        f"Card {len(detected_cards) + 1}",
+                        (cx - 30, cy - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (255, 255, 255),
+                        2
+                    )
+
+                card = DetectedCard(
+                    center=Point2D(x=cx, y=cy),
+                    corners=ordered_corners,
+                    warped_image=warped_image,
+                )
+                detected_cards.append(card)
+
+        # Display the debug windows
+        if debug_mode:
+            cv2.imshow("1. Found Contours", debug_contours)
+            cv2.imshow("2. Raw Hough Lines (Red)", debug_raw)
+            cv2.imshow("3. Filtered Lines & Intersections", debug_filtered)
+            cv2.imshow("4. Final Detected Cards", debug_final)  # ADDED: Show the final shapes
+
+            # ADDED: Show warped cards if they were requested
+            if include_img:
+                for i, card in enumerate(detected_cards):
+                    if card.warped_image is not None:
+                        cv2.imshow(f"Warped Card {i + 1}", card.warped_image)
+
+            print("Press any key on the image windows to continue...")
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+
+        return detected_cards
     @staticmethod
     def display_cards_in_image(img: np.ndarray) -> None:
         """
