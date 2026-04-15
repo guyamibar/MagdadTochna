@@ -3,6 +3,7 @@ import sys
 import cv2
 import numpy as np
 from pathlib import Path
+from typing import Tuple, List, Dict
 
 # Add project root and game_structure to sys.path
 root = Path(__file__).parent.parent
@@ -23,46 +24,42 @@ BOX_H = 140
 # --- Fixed Object Regions ---
 BOTTOM_OBJ_Y_START = TABLE_HEIGHT - 330
 
-# Adjusted TOP_OBJECT to sit between the physical cards
-TOP_OBJ_X_START = 220
+# Adjusted TOP_OBJECT to sit between the physical cards without overlap
+TOP_OBJ_X_START = 240
 TOP_OBJ_X_END = 480
 TOP_OBJ_Y_END = 250
 
-# PICKUP spans the space of the two middle cards in the bottom row (423 and 538)
+# PICKUP moved to Row 3 (previously Row 2)
 PICKUP_X_START = 400
 PICKUP_X_END = 560
 PICKUP_Y_CENTER = 507
 
 GROUP_LOCATIONS = {}
 
-# ROW 1: 6 MYCLOSED Cards (Exact coordinates from image)
-GROUP_LOCATIONS["MYCLOSED_1"] = (65, 216)
-GROUP_LOCATIONS["MYCLOSED_2"] = (181, 219)
-GROUP_LOCATIONS["MYCLOSED_3"] = (555, 222)
-GROUP_LOCATIONS["MYCLOSED_4"] = (661, 222)
-GROUP_LOCATIONS["MYCLOSED_5"] = (782, 223)
-GROUP_LOCATIONS["MYCLOSED_6"] = (892, 230)
+# ROW 1: 6 MYCARDS Cards (Exact coordinates from image)
+GROUP_LOCATIONS["MYCARDS_1"] = (65, 215)
+GROUP_LOCATIONS["MYCARDS_2"] = (181, 215)
+GROUP_LOCATIONS["MYCARDS_3"] = (555, 215)
+GROUP_LOCATIONS["MYCARDS_4"] = (661, 215)
+GROUP_LOCATIONS["MYCARDS_5"] = (782, 215)
+GROUP_LOCATIONS["MYCARDS_6"] = (892, 215)
 
-# ROW 2: DECKPLAYER_1, (Skip 173 for space), MYDECK, 5x MYOPEN
-GROUP_LOCATIONS["DECKPLAYER_1"] = (64, 347)
-# Note: We skip the physical card at (173, 355) to give DECKP_1 extra space!
-GROUP_LOCATIONS["MYDECK"] = (289, 358)
-GROUP_LOCATIONS["MYOPEN_1"] = (390, 359)
-GROUP_LOCATIONS["MYOPEN_2"] = (491, 362)
-GROUP_LOCATIONS["MYOPEN_3"] = (610, 362)
-GROUP_LOCATIONS["MYOPEN_4"] = (725, 355)
-GROUP_LOCATIONS["MYOPEN_5"] = (842, 368) # Takes the spot DECKP_2 used to have
+# ROW 2 (PUBPILEs & MYDECK): 6 slots + MYDECK at the right
+GROUP_LOCATIONS["PUBPILE_1"] = (194, 360)
+GROUP_LOCATIONS["PUBPILE_2"] = (311, 360)
+GROUP_LOCATIONS["PUBPILE_3"] = (423, 360)
+GROUP_LOCATIONS["PUBPILE_4"] = (538, 360)
+GROUP_LOCATIONS["PUBPILE_5"] = (645, 360)
+GROUP_LOCATIONS["PUBPILE_6"] = (761, 360)
+GROUP_LOCATIONS["MYDECK"] = (880, 360)
 
-# ROW 3: PUBPILEs using the exact outer 4 card coordinates from the image
-GROUP_LOCATIONS["PUBPILE_1"] = (194, 503)
-GROUP_LOCATIONS["PUBPILE_2"] = (311, 506)
-# (The cards at 423 and 538 are effectively acting as the PICKUP zone space)
-GROUP_LOCATIONS["PUBPILE_3"] = (645, 511)
-GROUP_LOCATIONS["PUBPILE_4"] = (761, 512)
+# ROW 3 (DECKs & PICKUP): DECKPLAYER_1, PUBLIC_DECK, and PICKUP
+GROUP_LOCATIONS["DECKPLAYER_1"] = (64, 507)
+GROUP_LOCATIONS["PUBLIC_DECK"] = (289, 507)
 
 # ROW 4+ (Y > 650): OPENPLAYER (Opponent cards) and DECKPLAYER_2
 # Placed lower down out of physical reach, but visible to the camera
-GROUP_LOCATIONS["DECKPLAYER_2"] = (780, 650) # Placed safely to the left of OPENP_2
+GROUP_LOCATIONS["DECKPLAYER_2"] = (750, 650) # Adjusted left to avoid overlap with OPENPLAYER_2_1
 for i in range(1, 6):
     y_offset = 650 + (i - 1) * 110
     GROUP_LOCATIONS[f"OPENPLAYER_1_{i}"] = (100, int(y_offset))
@@ -89,15 +86,15 @@ def get_group(p: Point2D) -> str:
             return group_name
     return "UNKNOWN"
 
-def get_center_cord(group_name: str) -> tuple[int, int]:
+def get_center_cord(group_name: str):
     """
     Returns the (x, y) coordinates of the center of a given group/slot.
-    Supports both exact names (MYOPEN_1) and shorthand (MYOPEN1).
+    Supports both exact names (MYCARDS_1) and shorthand (MYCARDS1).
     """
     if group_name in GROUP_LOCATIONS:
         return GROUP_LOCATIONS[group_name]
     
-    # Handle shorthand like MYOPEN1 -> MYOPEN_1
+    # Handle shorthand like MYCARDS1 -> MYCARDS_1
     import re
     match = re.search(r'([A-Za-z_]+)(\d+)$', group_name)
     if match:
@@ -167,7 +164,7 @@ def visualize_groups():
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
         # --- Replace the old saving code with this ---
-    output_filename = f"j_{TABLE_WIDTH}x{TABLE_HEIGHT}_v4.jpg"
+    output_filename = "board_layout_shafir_02.jpg"
 
     # This forces the path to be in the exact same folder as your python script
     output_path = str(Path(__file__).parent / output_filename)

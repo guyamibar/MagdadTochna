@@ -69,13 +69,13 @@ def visualize_options(image_path, crop_options, warp_options, output_dir='data/t
     print(f"Saved markup visualization to {viz_path}")
 
 if __name__ == "__main__":
-    image_dir = os.path.join('..', 'game_structure', 'data', 'hidden camera')
+    image_dir = os.path.join('..', 'game_structure', 'data', 'hidden_camera')
     image_files = [f for f in os.listdir(image_dir) if f.endswith(('.jpg', '.png'))]
     
     if len(sys.argv) > 1:
         sample_image = sys.argv[1]
     elif image_files:
-        sample_image = os.path.join(image_dir, image_files[2])
+        sample_image = os.path.join(image_dir, image_files[4])
     else:
         print("No sample images found.")
         sys.exit(1)

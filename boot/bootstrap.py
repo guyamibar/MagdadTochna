@@ -10,10 +10,10 @@ sys.path.append(str(ROOT_DIR))
 sys.path.append(str(ROOT_DIR / "boot"))
 
 # Import our custom modules from the 'boot' folder
-from boot.shoot_photo import shoot_and_detect
-from boot.translate_photo_to_game_state import get_current_game_state
-from boot.translate_from_ai_move_to_physical import translate_and_execute
-from boot.translate_dealer_start_info_to_physical import deal_cards
+from boot.shoot_photo import shoot_photo
+from boot.photo_to_state_pipeline.photo_to_state_translation import translate_photo_to_file
+from boot.translations.translate_from_ai_move_to_physical import translate_and_execute
+from boot.translations.translate_dealer_start_info_to_physical import deal_cards
 
 # Paths for monitoring AI communication
 DATA_DIR = ROOT_DIR / "prompt_engineering_bot" / "data"
@@ -21,6 +21,7 @@ DEALING_FILE = DATA_DIR / "dealing.txt"
 GAME_STATE_FILE = DATA_DIR / "current_game_state_input.txt"
 NEXT_MOVE_FILE = DATA_DIR / "next_move.txt"
 CACHE_FILE = DATA_DIR / "structured_rules_cache.txt"
+RESULT_STATE_FILE = ROOT_DIR / "boot" / "photo_to_state_pipeline" / "result_state.txt"
 
 def turn_button_pushed():
     """
@@ -52,7 +53,7 @@ def thread_run_dealer_start_loop_check():
 
 # --- THREAD 3: MAIN GAME LOOP ---
 def thread_run_game_turn_loop():
-    """The master loop that coordinates CV, AI, and Physics."""
+    """The master loop that coordinates Acquisition, Translation, and AI."""
     print("🎮 [Thread 3] Game Turn loop active.")
     
     while True:
@@ -62,17 +63,27 @@ def thread_run_game_turn_loop():
             if turn_button_pushed():
                 print("\n📸 [Game] Button Pushed! Capturing live state...")
                 
-                res = shoot_and_detect()
-                if res is None:
+                # 1. Capture Photo
+                if not shoot_photo():
                     continue
                 
-                state_text = get_current_game_state(res)
+                # 2. Translate Photo to Game State (updates current_game_state_input.txt)
+                if not translate_photo_to_file():
+                    continue
+                
+                # 3. Read the logical state
+                if GAME_STATE_FILE.exists():
+                    state_text = GAME_STATE_FILE.read_text(encoding="utf-8")
+                else:
+                    print("❌ Error: current_game_state_input.txt not found after translation.")
+                    continue
                 
                 print("📝 [Game] State updated. AI is now calculating move...")
                 last_mtime = NEXT_MOVE_FILE.stat().st_mtime if NEXT_MOVE_FILE.exists() else 0
                 
-                # IMPORTANT: Writing to this file triggers the AI engine in game_session.py
-                GAME_STATE_FILE.write_text(state_text, encoding="utf-8")
+                # IMPORTANT: The file is already updated by translate_photo_to_file. 
+                # We don't need to re-write it unless we want to force a change trigger.
+                # GAME_STATE_FILE.write_text(state_text, encoding="utf-8")
                 
                 print("⌛ [Game] Waiting for AI Tactical Response (next_move.txt)...")
                 timeout = 45 
@@ -103,8 +114,9 @@ if __name__ == "__main__":
     """)
     
     # Reset files
-    from boot.hand_manager import save_hand
-    save_hand({f"MYCLOSED_{i}": None for i in range(1, 7)})
+    from boot.hand_manager import save_hand, save_pickup
+    save_hand({f"MYCARDS_{i}": [None, None] for i in range(1, 7)})
+    save_pickup([None, None])
     if DEALING_FILE.exists(): DEALING_FILE.write_text("", encoding="utf-8")
     if GAME_STATE_FILE.exists(): GAME_STATE_FILE.write_text("", encoding="utf-8")
 

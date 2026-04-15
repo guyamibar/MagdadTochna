@@ -33,9 +33,11 @@ LOCK_FILE = DATA_DIR / "manager_active.lock"
 CACHE_FILE = DATA_DIR / "structured_rules_cache.txt"
 PID_FILE = PROC_DIR / "session.pid"
 DEALING_FILE = DATA_DIR / "dealing.txt"
+SNAP_TRIGGER = DATA_DIR / "snap.txt"
+EXIT_TRIGGER = DATA_DIR / "exit.txt"
 
 # Conversation states
-(MAIN_MENU, SET_PLAYERS, SET_DECK, SET_PILES, SET_PASS, SET_DRAW_PILES, SET_DRAW_DECK, SET_PERSONAL, SET_FREE_RULES, SET_CARDS_PER_PLAYER, SET_PUBLIC_CARDS_COUNT, CONFIRM_RULES) = range(12)
+(MAIN_MENU, SET_PLAYERS, SET_DECK, SET_PILES, SET_PASS, SET_DRAW_PILES, SET_DRAW_DECK, SET_PERSONAL, SET_FREE_RULES, SET_CARDS_PER_PLAYER, SET_PUBLIC_CARDS_COUNT, CONFIRM_RULES, GAME_ONGOING) = range(13)
 
 # Keyboards
 MAIN_MENU_KBD = ReplyKeyboardMarkup([['Uno', 'Blackjack'], ['War', 'Custom']], one_time_keyboard=True, resize_keyboard=True)
@@ -58,20 +60,46 @@ PILES_KBD = ReplyKeyboardMarkup([
     ['0', '1', '2', '3'],
     ['4', '5', '6']
 ], one_time_keyboard=True, resize_keyboard=True)
+GAME_KBD = ReplyKeyboardMarkup([["It's the bot's turn"], ["End"]], resize_keyboard=True)
+
+async def bake_rules_final(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Finalizes the setup by writing the dealing sequence."""
+    try:
+        ud = context.user_data
+        num_players_input = int(ud.get('players', 2))
+        cards_per_player = int(ud.get('cards_per_player', 0))
+        public_cards_total = int(ud.get('public_cards', 0))
+        
+        lines = []
+        for i in range(1, 4):
+            count = cards_per_player if i <= num_players_input else 0
+            lines.append(f"PLAYER {i}: {count}")
+        lines.append("")
+        lines.append(f"PUBLIC CARDS: {public_cards_total}")
+        DEALING_FILE.write_text("\n".join(lines), encoding="utf-8")
+        
+        await update.message.reply_text(f"✅ Setup for {ud['choice']} is now BAKED and ready!\n\nYou can now use the menu below to control the bot.", reply_markup=GAME_KBD)
+    except Exception as e: 
+        await update.message.reply_text(f"❌ Error during finalization: {str(e)}")
+    return ConversationHandler.END
+
+async def handle_game_turn(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handles manual triggers for the bot's turn or ending the program."""
+    text = update.message.text
+    if text == "It's the bot's turn":
+        SNAP_TRIGGER.write_text("telegram_button_snap", encoding="utf-8")
+        await update.message.reply_text("📸 Snap triggered! Bot is analyzing...", reply_markup=GAME_KBD)
+    elif text == "End":
+        await update.message.reply_text("🛑 Shutting down the entire system... Goodbye!", reply_markup=ReplyKeyboardRemove())
+        EXIT_TRIGGER.write_text("manual_exit", encoding="utf-8")
+        # Small delay to ensure message is sent
+        time.sleep(1)
+        os._exit(0)
+    return ConversationHandler.END
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not LOCK_FILE.exists():
-        await update.message.reply_text("🛑 The Game Session Manager is not active.\nUse /session to start a new game session first.")
-        return ConversationHandler.END
-    if CACHE_FILE.exists() and CACHE_FILE.stat().st_size > 0:
-        await update.message.reply_text("🛑 A game session is already in progress with baked rules.\nUse /terminate to end the current session before starting a new one.")
-        return ConversationHandler.END
-    context.user_data.clear()
-    await update.message.reply_text("🍳 AI Card Game Rule Baker\n━━━━━━━━━━━━━━\n👥 1. How many PLAYERS (including the AI bot)?\n(Note: The AI Bot is always Player 1)", reply_markup=PLAYERS_KBD)
-    return SET_PLAYERS
-
-async def session(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Starts the game_session.py process."""
+    # 1. Start Session if not running
+    is_running = False
     if PID_FILE.exists():
         pid_str = PID_FILE.read_text().strip()
         if pid_str:
@@ -80,32 +108,40 @@ async def session(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if os.name == "nt":
                     res = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True)
                     if str(pid) in res.stdout:
-                        await update.message.reply_text("🛑 A session is already running.")
-                        return
+                        is_running = True
                 else:
                     try:
                         os.kill(pid, 0)
-                        await update.message.reply_text("🛑 A session is already running.")
-                        return
+                        is_running = True
                     except (ProcessLookupError, PermissionError):
-                        pass # Process not running or no permission (assume dead)
+                        pass
             except (ValueError, subprocess.CalledProcessError):
                 PID_FILE.unlink()
 
-    try:
-        python_exe = sys.executable
-        script_path = BASE_DIR / "game_session.py"
-        
-        # Start the session process in unbuffered mode (-u).
-        # This will make its print() statements appear immediately in the parent console.
-        subprocess.Popen(
-            [python_exe, "-u", str(script_path)], 
-            cwd=str(BASE_DIR)
-        )
+    if not is_running:
+        try:
+            python_exe = sys.executable
+            script_path = BASE_DIR / "game_session.py"
+            subprocess.Popen([python_exe, "-u", str(script_path)], cwd=str(BASE_DIR))
+            await update.message.reply_text("🚀 Game Session Manager started!\nIts output will now appear in your main terminal.")
+            # Wait briefly for lock file to be created
+            time.sleep(1)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Failed to start session: {e}")
+            return ConversationHandler.END
 
-        await update.message.reply_text("🚀 Game Session Manager started!\nIts output will now appear in your main terminal.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Failed to start session: {e}")
+    if not LOCK_FILE.exists():
+        await update.message.reply_text("🛑 The Game Session Manager failed to create the lock file. Please check the logs.")
+        return ConversationHandler.END
+
+    # 2. Clean Slate for new setup (allow /start to act as a reset)
+    if CACHE_FILE.exists():
+        CACHE_FILE.write_text("")
+    context.user_data.clear()
+    
+    # 3. Begin Conversation
+    await update.message.reply_text("🍳 AI Card Game Rule Baker\n━━━━━━━━━━━━━━\n👥 1. How many PLAYERS (including the AI bot)?\n(Note: The AI Bot is always Player 1)", reply_markup=PLAYERS_KBD)
+    return SET_PLAYERS
 
 async def terminate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -165,12 +201,13 @@ async def set_public_cards_count(update: Update, context: ContextTypes.DEFAULT_T
         # Check if it's an algorithmic solver - if so, skip confirmation
         if ud['raw_rules'].strip().upper() in ALGO_SOLVERS:
             await update.message.reply_text(f"✅ {ud['choice']} (Algorithmic) rules applied. Finalizing setup...")
-            return await bake_rules_final(update, context)
+            await bake_rules_final(update, context)
+            return ConversationHandler.END
 
         await update.message.reply_text("🧠 AI is processing the rules and preparing a summary...")
         
         # 2. Ask the AI to create a human-friendly explanation of those structured rules
-        from game_engine import generate_content_with_fallback
+        from rotate_key_model import rotator
         explanation_prompt = f"""
         Below are the structured, machine-readable rules for a card game. 
         Your task is to rewrite these rules into a clear, concise, and human-friendly explanation.
@@ -181,7 +218,8 @@ async def set_public_cards_count(update: Update, context: ContextTypes.DEFAULT_T
 
         Provide the explanation in a simple, bulleted format. Do not use Markdown symbols like '*' or '_' that might break the Telegram parser.
         """
-        explanation, _ = generate_content_with_fallback(explanation_prompt)
+        response = rotator.call_with_retry(explanation_prompt)
+        explanation = response.text.strip()
         
         ud['structured_rules'] = structured # Store for later use
         
@@ -202,7 +240,8 @@ async def confirm_rules(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     if choice == "Yes, those are the rules":
         # Rules are already baked into CACHE_FILE by generate_structured_rules()
         await update.message.reply_text("✅ Rules confirmed! Finalizing the setup...")
-        return await bake_rules_final(update, context)
+        await bake_rules_final(update, context)
+        return ConversationHandler.END
     elif choice == "No, let me try again":
         if CACHE_FILE.exists():
             CACHE_FILE.write_text("") # Erase the structured rules cache
@@ -216,26 +255,7 @@ async def confirm_rules(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return ConversationHandler.END
     return CONFIRM_RULES
 
-async def bake_rules_final(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Finalizes the setup by writing the dealing sequence."""
-    try:
-        ud = context.user_data
-        num_players_input = int(ud.get('players', 2))
-        cards_per_player = int(ud.get('cards_per_player', 0))
-        public_cards_total = int(ud.get('public_cards', 0))
-        
-        lines = []
-        for i in range(1, 4):
-            count = cards_per_player if i <= num_players_input else 0
-            lines.append(f"PLAYER {i}: {count}")
-        lines.append("")
-        lines.append(f"PUBLIC CARDS: {public_cards_total}")
-        DEALING_FILE.write_text("\n".join(lines), encoding="utf-8")
-        
-        await update.message.reply_text(f"✅ Setup for {ud['choice']} is now BAKED and ready!\n\nGoodbye! 👋")
-    except Exception as e: 
-        await update.message.reply_text(f"❌ Error during finalization: {str(e)}")
-    return ConversationHandler.END
+
 
 async def set_players(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['players'] = update.message.text
@@ -277,7 +297,8 @@ async def confirm_rules(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     if choice == "Yes, those are the rules":
         # Rules are already baked into CACHE_FILE by generate_structured_rules()
         await update.message.reply_text("✅ Rules confirmed! Finalizing the setup...")
-        return await bake_rules_final(update, context)
+        await bake_rules_final(update, context)
+        return ConversationHandler.END
     elif choice == "No, let me try again":
         if CACHE_FILE.exists():
             CACHE_FILE.write_text("") # Erase the structured rules cache
@@ -296,7 +317,6 @@ if __name__ == "__main__":
     if not TOKEN: exit(1)
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("terminate", terminate))
-    app.add_handler(CommandHandler("session", session))
     app.add_handler(ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -315,4 +335,8 @@ if __name__ == "__main__":
         },
         fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END), CommandHandler("start", start)],
     ))
+    
+    # Add a global handler for the Game Menu after the rules are baked
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^(It's the bot's turn|End)$"), handle_game_turn))
+    
     app.run_polling()

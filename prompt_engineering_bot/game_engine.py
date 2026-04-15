@@ -1,7 +1,7 @@
 import os
 import sys
 from pathlib import Path
-from google import genai
+from rotate_key_model import rotator
 
 # Add algorithmic_solvers to path
 ALGO_PATH = Path(__file__).parent / "algorithmic_solvers"
@@ -20,35 +20,6 @@ try:
 except ImportError as e:
     print(f"Warning: Solvers not available: {e}")
     ALGO_SOLVERS = {}
-
-# Best practice: Set this in your terminal/system, not in the code itself!
-os.environ["GEMINI_API_KEY"] = "AIzaSyCHyk8QN1UjtybX1WJOV-MNgVIxdLBAyXg"
-client = genai.Client()
-
-# Model Fallback List (Ordered by preference)
-MODELS = [
-    "gemini-flash-lite-latest",
-    "gemini-2.0-flash-lite-preview-02-05", # Fastest/Latest Lite
-    "gemini-1.5-flash",                  # Most stable
-    "gemini-1.5-flash-8b",               # Smallest/Fastest
-    "gemini-1.0-pro"                     # Legacy Stable
-]
-
-def generate_content_with_fallback(prompt, model_list=MODELS):
-    """Try models in order if one is overloaded or rate-limited."""
-    for model_id in model_list:
-        try:
-            response = client.models.generate_content(model=model_id, contents=prompt)
-            return response.text.strip(), model_id
-        except Exception as e:
-            # Check for rate limit or high demand (ResourceExhausted)
-            if "429" in str(e) or "ResourceExhausted" in str(e):
-                print(f"⚠️ Model {model_id} is busy. Trying fallback...")
-                continue
-            else:
-                # Re-raise other unexpected errors
-                raise e
-    raise Exception("❌ All Gemini models are currently unavailable or rate-limited.")
 
 STRUCTURED_RULES_FILE = Path(__file__).parent / "data" / "structured_rules_cache.txt"
 RAW_RULES_FILE = Path(__file__).parent / "data" / "raw_rules_input.txt"
@@ -94,7 +65,8 @@ def generate_structured_rules(raw_rules_input):
 
 	Output only the structured rules. Do not include introductory or concluding remarks.
 	"""
-    structured, used_model = generate_content_with_fallback(prompt_1)
+    response = rotator.call_with_retry(prompt_1)
+    structured = response.text.strip()
     STRUCTURED_RULES_FILE.write_text(structured, encoding="utf-8")
     return structured
 
@@ -127,7 +99,8 @@ You are a robotic, literal rules enforcement engine. Analyze the state and list 
 {game_state_input}
 </GAME_STATE>
 """
-    legal_moves, _ = generate_content_with_fallback(prompt_2)
+    response_2 = rotator.call_with_retry(prompt_2)
+    legal_moves = response_2.text.strip()
 
     # --- STAGE 3: Strategy ---
     prompt_3 = f"""
@@ -137,7 +110,8 @@ You are an expert tactical advisor. Determine the single best move from the veri
 **State:** {game_state_input}
 **Legal Moves:** {legal_moves}
 """
-    strategy, _ = generate_content_with_fallback(prompt_3)
+    response_3 = rotator.call_with_retry(prompt_3)
+    strategy = response_3.text.strip()
 
     # --- STAGE 4: Validation & Formatting ---
     prompt_4 = f"""
@@ -186,12 +160,13 @@ Every line of the output MUST strictly follow the format: * src: SOURCE, dest: D
 The final line MUST be: * PASS
 DO NOT include any analysis, reasoning, or 'Illegal Move' text.
 """
-    final_result, _ = generate_content_with_fallback(prompt_4)
+    response_4 = rotator.call_with_retry(prompt_4)
+    final_result = response_4.text.strip()
     return {
         "legal_moves": legal_moves,
         "strategy": strategy,
         "final_result": final_result,
-        "algo": res.get("algo", False) if 'res' in locals() else cache_rules in ALGO_SOLVERS
+        "algo": False
     }
 
 

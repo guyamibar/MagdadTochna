@@ -73,11 +73,11 @@ def build_game_state(detected_cards: List[DetectedCard]) -> str:
             idx = group_full.split("_")[1]
             state_data[f"P{idx}"] = label
             
-        elif group_full.startswith("MYOPEN_"):
-            state_data["MYOPEN"].append(label)
-            
-        elif group_full.startswith("MYCLOSED_"):
-            state_data["MYCLOSED"].append(label)
+        elif group_full.startswith("MYCARDS_"):
+            if card.is_face_down:
+                state_data["MYCLOSED"].append(label)
+            else:
+                state_data["MYOPEN"].append(label)
             
         elif group_full == "MYDECK":
             state_data["MYDECK"] = "TRUE"
@@ -94,7 +94,7 @@ def build_game_state(detected_cards: List[DetectedCard]) -> str:
         elif group_full == "DECKPLAYER_2":
             state_data["PLAYER3_DECK"] = "TRUE"
             
-        elif group_full == "PICKUP":
+        elif group_full == "PICKUP" or group_full == "PUBLIC_DECK":
             state_data["PUBLIC_DECK"] = "TRUE"
 
     # Format into string
@@ -157,7 +157,19 @@ def find_card_coordinate(src_group: str, card_label: str, detected_cards: List[D
             
     # Final fallback: use the center of the first slot in that group from board_layout
     try:
-        cx, cy = get_center_cord(f"{src_group}_1" if src_group in ["MYOPEN", "MYCLOSED", "PUBPILE"] else src_group)
+        lookup_group = src_group
+        if src_group in ["MYOPEN", "MYCLOSED"]:
+            lookup_group = "MYCARDS"
+        
+        # Public deck could be PICKUP or PUBLIC_DECK, let's try PUBLIC_DECK first
+        if src_group == "PUBLIC_DECK":
+            try:
+                cx, cy = get_center_cord("PUBLIC_DECK")
+            except:
+                cx, cy = get_center_cord("PICKUP")
+        else:
+            cx, cy = get_center_cord(f"{lookup_group}_1" if lookup_group in ["MYCARDS", "PUBPILE"] else lookup_group)
+        
         return Point2D(x=cx, y=cy)
     except:
         return None

@@ -94,18 +94,22 @@ class Gsd:
         Returns:
             CardDetectionResult containing annotated image and detected cards.
         """
-        first_frame = frames[0]
+        if not frames:
+            # Fallback if frames list is empty
+            return CardDetectionResult(annotated_image=None)
 
-        for frame in frames:
-            result = read_apriltags(frame, self.camera_params)
-            cv2.waitKey(0)
-            self.tags = result.tags
+        # For now, we process only the first valid frame
+        frame = frames[0]
+        result = read_apriltags(frame, self.camera_params)
+        self.tags = result.tags
 
-            warped_frame = self.warp_table_exact(first_frame)
+        try:
+            warped_frame = self.warp_table_exact(frame)
             return read_cards(warped_frame, self.clsf)
-
-        # Fallback if frames list is empty (should not happen)
-        return CardDetectionResult(annotated_image=first_frame)
+        except Exception as e:
+            print(f"❌ Error during table warping: {e}")
+            # Fallback to returning result from the raw frame (might be poor results)
+            return read_cards(frame, self.clsf)
 
     @staticmethod
     def order_points(pts: np.ndarray) -> np.ndarray:

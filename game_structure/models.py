@@ -212,6 +212,38 @@ class DetectedCard:
         """Return corners as int32 array for OpenCV drawing functions."""
         return self.corners.astype(np.int32)
 
+    def get_angle(self) -> float:
+        """
+        Calculate the angle of the card in degrees based on all 4 of its corners.
+        Assumes corners are ordered: top-left, top-right, bottom-right, bottom-left.
+        Returns the average angle of the top and bottom edges relative to the horizontal axis.
+        """
+        if self.corners is None or len(self.corners) < 4:
+            return 0.0
+            
+        tl = self.corners[0]
+        tr = self.corners[1]
+        br = self.corners[2]
+        bl = self.corners[3]
+        
+        # Calculate angle of the top edge
+        angle_top_rad = np.arctan2(tr[1] - tl[1], tr[0] - tl[0])
+        angle_top_deg = np.degrees(angle_top_rad)
+        
+        # Calculate angle of the bottom edge
+        angle_bottom_rad = np.arctan2(br[1] - bl[1], br[0] - bl[0])
+        angle_bottom_deg = np.degrees(angle_bottom_rad)
+        
+        # Normalize bottom angle to be close to top angle for averaging
+        if abs(angle_top_deg - angle_bottom_deg) > 180:
+             if angle_bottom_deg < 0:
+                 angle_bottom_deg += 360
+             else:
+                 angle_bottom_deg -= 360
+                 
+        # Return the average angle
+        return float((angle_top_deg + angle_bottom_deg) / 2.0)
+
 
 @dataclass
 class CardDetectionResult:

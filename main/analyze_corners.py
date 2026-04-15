@@ -25,7 +25,7 @@ def analyze_pixel_density(image_path):
     return density
 
 if __name__ == "__main__":
-    img_dir = os.path.join('game_structure', 'data', 'hidden camera')
+    img_dir = os.path.join('game_structure', 'data', 'hidden_camera')
     for filename in os.listdir(img_dir):
         if filename.endswith('.jpg'):
             path = os.path.join(img_dir, filename)

@@ -8,8 +8,7 @@ in images using contour detection and perspective transformation.
 from __future__ import annotations
 
 import sys
-from typing import Optional
-
+from typing import Optional, List, Tuple
 import cv2
 import numpy as np
 from game_structure.models import DetectedCard, Point2D
@@ -154,73 +153,143 @@ class CardOutlineDetector:
         return warped
 
     @staticmethod
-    def get_card_outlines(
-        img: np.ndarray,
-        include_img: bool = False,
-    ) -> list[DetectedCard]:
+    def get_line_intersection(line1: Tuple[int, int, int, int], line2: Tuple[int, int, int, int]) -> Optional[
+        Tuple[int, int]]:
+        """Calculates the exact (x, y) intersection of two lines using determinants."""
+        x1, y1, x2, y2 = line1
+        x3, y3, x4, y4 = line2
+
+        den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if den == 0:
+            return None
+
+        num_t = (x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)
+        px = x1 + num_t * (x2 - x1) / den
+        py = y1 + num_t * (y2 - y1) / den
+
+        return (int(px), int(py))
+
+    def calculate_angle(line: Tuple[int, int, int, int]) -> float:
+        """Calculates the angle of a line in degrees."""
+        x1, y1, x2, y2 = line
+        return np.degrees(np.arctan2(y2 - y1, x2 - x1)) % 180
+
+    def calculate_line_length(line: Tuple[int, int, int, int]) -> float:
+        """Calculates the physical length of a line segment."""
+        return np.hypot(line[2] - line[0], line[3] - line[1])
+
+    @staticmethod
+    def are_lines_collinear(line1: Tuple[int, int, int, int], line2: Tuple[int, int, int, int], angle_tol=15,
+                            dist_tol=30) -> bool:
         """
-        Detect card outlines in an image.
-
-        Uses edge detection and contour analysis to find quadrilateral
-        shapes that likely represent playing cards.
-
-        Args:
-            img: Input BGR image to process.
-            include_img: If True, include perspective-corrected card images
-                        in the output DetectedCard objects.
-
-        Returns:
-            List of DetectedCard objects representing found cards.
+        Checks if line2 is just a fragmented continuation of line1.
+        Requires them to have roughly the same angle AND be physically overlapping.
         """
-        original = img.copy()
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # 1. Angle Check
+        theta1 = CardOutlineDetector.calculate_angle(line1)
+        theta2 = CardOutlineDetector.calculate_angle(line2)
+        angle_diff = min(abs(theta1 - theta2), 180 - abs(theta1 - theta2))
 
-        # Apply Gaussian blur to reduce noise
-        blur = cv2.GaussianBlur(gray, (5, 5), 1.2)
+        if angle_diff > angle_tol:
+            return False  # Angles are different, must be adjacent sides
 
-        # Perform Canny edge detection
-        edges = cv2.Canny(blur, 50, 150)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        closed_edges = cv2.dilate(edges, kernel, iterations=1)
+        # 2. Distance Check (Perpendicular distance from line2's center to line1)
+        x1, y1, x2, y2 = line1
+        x3, y3, x4, y4 = line2
 
-        # Find contours in the edge-detected image
-        contours, _ = cv2.findContours(
-            closed_edges,
-            cv2.RETR_EXTERNAL,
-            cv2.CHAIN_APPROX_SIMPLE,
+        # Midpoint of line2
+        mid_x, mid_y = (x3 + x4) / 2.0, (y3 + y4) / 2.0
+
+        length1 = CardOutlineDetector.calculate_line_length(line1)
+        if length1 == 0:
+            return False
+
+        # Mathematical distance from a point to a line
+        dist = abs((x2 - x1) * (y1 - mid_y) - (x1 - mid_x) * (y2 - y1)) / length1
+
+        return dist < dist_tol
+
+    # --- Main Filtering Function ---
+    @staticmethod
+    def find_corners_via_intersections(
+            contour: np.ndarray,
+            edge_image: np.ndarray,
+            debug_raw: Optional[np.ndarray] = None,
+            debug_filtered: Optional[np.ndarray] = None
+    ) -> Optional[np.ndarray]:
+        """Finds 4 corners by prioritizing the longest, distinct straight lines."""
+
+        # 1. Isolate edges
+        mask = np.zeros_like(edge_image)
+        cv2.drawContours(mask, [contour], -1, 255, 1)
+        isolated_edges = cv2.bitwise_and(edge_image, mask)
+
+        # 2. Find all straight lines
+        lines = cv2.HoughLinesP(
+            isolated_edges, rho=1, theta=np.pi / 180, threshold=30, minLineLength=40, maxLineGap=10
         )
 
-        detected_cards: list[DetectedCard] = []
+        if lines is None or len(lines) < 4:
+            return None
 
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            if area < MIN_CARD_AREA:
-                continue
+        # DEBUG: Draw raw lines
+        if debug_raw is not None:
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                cv2.line(debug_raw, (x1, y1), (x2, y2), (0, 0, 255), 2)
 
-            # Approximate the contour to a polygon
-            perimeter = cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, 0.03 * perimeter, True)
+        flat_lines = [line[0] for line in lines]
 
-            # Keep only 4-vertex polygons (quadrilaterals)
-            if len(approx) == QUADRILATERAL_VERTICES:
-                moments = cv2.moments(approx)
-                ordered_corners = CardOutlineDetector.order_points(approx.reshape(4, 2))
+        # 3. Sort all lines by length (Longest first)
+        flat_lines.sort(key=CardOutlineDetector.calculate_line_length, reverse=True)
 
-                cx = int(moments["m10"] / moments["m00"])
-                cy = int(moments["m01"] / moments["m00"])
+        # 4. Filter for the 4 strongest distinct sides
+        representative_lines = []
+        for line in flat_lines:
+            is_novel = True
 
-                warped_image: Optional[np.ndarray] = None
-                if include_img:
-                    warped_image = CardOutlineDetector.warp_card(original, ordered_corners)
+            # Check against the lines we've already kept
+            for rep_line in representative_lines:
+                if CardOutlineDetector.are_lines_collinear(rep_line, line):
+                    # This line is just a fragment of an edge we already have
+                    is_novel = False
+                    break
 
-                card = DetectedCard(
-                    center=Point2D(x=cx, y=cy),
-                    corners=ordered_corners,
-                    warped_image=warped_image,
-                )
-                detected_cards.append(card)
+            if is_novel:
+                representative_lines.append(line)
 
-        return detected_cards
+            if len(representative_lines) == 4:
+                break  # We found our 4 sides!
+
+        # Sort the final 4 lines by angle so we intersect adjacent sides correctly
+        representative_lines.sort(key=CardOutlineDetector.calculate_angle)
+
+        # DEBUG: Draw filtered lines
+        if debug_filtered is not None:
+            colors = [(0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255)]
+            for i, line in enumerate(representative_lines):
+                x1, y1, x2, y2 = line
+                cv2.line(debug_filtered, (x1, y1), (x2, y2), colors[i % 4], 3)
+
+        # 5. Intersect adjacent lines to find corners
+        corners = []
+        if len(representative_lines) == 4:
+            for i in range(4):
+                line1 = representative_lines[i]
+                line2 = representative_lines[(i + 1) % 4]
+                pt = CardOutlineDetector.get_line_intersection(line1, line2)
+                if pt is not None:
+                    corners.append(pt)
+
+        # DEBUG: Draw corners
+        if len(corners) == 4 and debug_filtered is not None:
+            for pt in corners:
+                cv2.circle(debug_filtered, pt, 6, (0, 165, 255), -1)
+
+        if len(corners) == 4:
+            return np.array(corners, dtype=np.int32).reshape(4, 2)
+
+        return None
 
     @staticmethod
     def display_cards_in_image(img: np.ndarray) -> None:
@@ -302,6 +371,7 @@ if __name__ == "__main__":
     while True:
         ret, frame = cam.read()
 
+
         if not ret:
             print("Error: Failed to capture image.")
             break
@@ -312,6 +382,7 @@ if __name__ == "__main__":
 
         # SPACE pressed - capture and classify cards
         if key == KEY_SPACE:
+            frame = cv2.imread("../main/test2.jpg")
             detected_cards = CardOutlineDetector.get_card_outlines(frame, include_img=True)
             for card in detected_cards:
                 if card.warped_image is not None:

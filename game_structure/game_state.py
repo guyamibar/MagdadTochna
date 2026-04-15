@@ -18,34 +18,34 @@ class GameState(BaseModel):
     my_open: List[Card]
     my_deck: bool
 
-# --- Example Usage ---
+# # --- Example Usage ---
 
-# 1. Create an object
-current_game = GameState(
-    heaps_heads = [Card(rank="10", suit="Spades")],
-    deck = True,
-    players = [Player(hand=5, open=[], deck=False)],
-    my_hand = [Card(rank="A", suit="Hearts")],
-    my_open = [],
-    my_deck = True
-)
+# # 1. Create an object
+# current_game = GameState(
+#     heaps_heads = [Card(rank="10", suit="Spades")],
+#     deck = True,
+#     players = [Player(hand=5, open=[], deck=False)],
+#     my_hand = [Card(rank="A", suit="Hearts")],
+#     my_open = [],
+#     my_deck = True
+# )
 
-def print_ai_format(game_state: GameState):
-    print("PUBLIC PILES TOP CARDS:")
-    for i, card in enumerate(game_state.heaps_heads, 1):
-        print(f"{i}. Top pile Card: {card.rank} of {card.suit}")
-    print()
-    print("MY OPEN CARDS:", "NONE" if not game_state.my_open else f"[{', '.join(f'{c.rank} of {c.suit}' for c in game_state.my_open)}]")
-    print("MY CLOSED CARDS:", f"[{', '.join(f'{c.rank} of {c.suit}' for c in game_state.my_hand)}] (all face down, shown to only to me)" if game_state.my_hand else "NONE")
-    for i, player in enumerate(game_state.players, 1):
-        print(f"PLAYER {i} OPEN CARDS:", False if not player.open else f"[{', '.join(f'{c.rank} of {c.suit}' for c in player.open)}]")
-        print(f"PLAYER {i} DECK:", player.deck)
-    print()
-    print("MYDECK:", game_state.my_deck)
-    print("MYOPEN:", "NONE" if not game_state.my_open else f"[{', '.join(f'{c.rank} of {c.suit}' for c in game_state.my_open)}]")
-    print("PUBLICDECK:", game_state.deck)
+# def print_ai_format(game_state: GameState):
+#     print("PUBLIC PILES TOP CARDS:")
+#     for i, card in enumerate(game_state.heaps_heads, 1):
+#         print(f"{i}. Top pile Card: {card.rank} of {card.suit}")
+#     print()
+#     print("MY OPEN CARDS:", "NONE" if not game_state.my_open else f"[{', '.join(f'{c.rank} of {c.suit}' for c in game_state.my_open)}]")
+#     print("MY CLOSED CARDS:", f"[{', '.join(f'{c.rank} of {c.suit}' for c in game_state.my_hand)}] (all face down, shown to only to me)" if game_state.my_hand else "NONE")
+#     for i, player in enumerate(game_state.players, 1):
+#         print(f"PLAYER {i} OPEN CARDS:", False if not player.open else f"[{', '.join(f'{c.rank} of {c.suit}' for c in player.open)}]")
+#         print(f"PLAYER {i} DECK:", player.deck)
+#     print()
+#     print("MYDECK:", game_state.my_deck)
+#     print("MYOPEN:", "NONE" if not game_state.my_open else f"[{', '.join(f'{c.rank} of {c.suit}' for c in game_state.my_open)}]")
+#     print("PUBLICDECK:", game_state.deck)
 
-print_ai_format(current_game)
+# print_ai_format(current_game)
 
 
 

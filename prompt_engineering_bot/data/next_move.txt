@@ -1,2 +1,2 @@
-* PLAY: src: MYCLOSED, dest: P1, card: 8 of Hearts
+* src: PUBLIC_DECK, dest: P1, card: Unknown
 * PASS

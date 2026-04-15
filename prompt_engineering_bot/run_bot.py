@@ -37,7 +37,12 @@ def start_system():
         print("\n\n🧹 Shutting down system...")
         if bot_proc:
             print("🛑 Stopping Telegram Bot...")
-            bot_proc.terminate()
+            bot_proc.send_signal(signal.SIGINT)
+            try:
+                bot_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                print("⚠️ Bot didn't stop in time, forcing termination.")
+                bot_proc.kill()
         sys.exit(0)
 
     # Register signals for clean exit (Ctrl+C)

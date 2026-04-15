@@ -209,7 +209,9 @@ class CardClassifier:
             label, confidence = self.class_names[idx1], conf1
         else:
             label, confidence = self.class_names[idx2], conf2
-            
+
+        if confidence < 0.9:
+            label, confidence = "BACK", 1 - confidence
         print(f"CNN Best View: {label} ({confidence*100:.1f}%)")
         return CardClassification(label=label, confidence=float(confidence))
 

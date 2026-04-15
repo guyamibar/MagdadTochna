@@ -1,8 +1,26 @@
 {
-    "MYCLOSED_1": null,
-    "MYCLOSED_2": null,
-    "MYCLOSED_3": null,
-    "MYCLOSED_4": null,
-    "MYCLOSED_5": null,
-    "MYCLOSED_6": null
+    "MYCARDS_1": [
+        "5 of C",
+        "OPEN"
+    ],
+    "MYCARDS_2": [
+        "10 of D",
+        "OPEN"
+    ],
+    "MYCARDS_3": [
+        "Unknown",
+        "CLOSED"
+    ],
+    "MYCARDS_4": [
+        "7 of D",
+        "OPEN"
+    ],
+    "MYCARDS_5": [
+        "K of S",
+        "CLOSED"
+    ],
+    "MYCARDS_6": [
+        null,
+        null
+    ]
 }
