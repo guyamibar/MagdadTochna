@@ -1,11 +1,18 @@
-import cv2
+import os
+import sys
 
+# Allow running this script directly from the repository root.
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+import cv2
 from boot.hand_manager import save_hand
 from game_structure.gsd import Gsd, camera_params
 import time
 import numpy as np
 import traceback
-from arduino_control.moveitmoveit import move_to, grab, grabber_release
+from arduino_control.moveitmoveit import move_to, grab, grabber_release, grabber_lazer
 try:
     from picamera2 import Picamera2
 
@@ -94,23 +101,20 @@ class HighResCamera:
         """Runs automatically when the 'with' block ends or crashes. Safely cleans up."""
         self.stop()
 
-    def take_image(self):
-        """Captures a single autofocus image."""
+    def take_image(self, autofocus=True):
+        """Captures a single image. Set autofocus=False to skip focus cycle for faster sequential captures."""
         if not self._started:
             if not self.start():
                 print("⚠️ [Camera] Returning dummy image.")
                 return np.zeros((3840, 4500, 3), dtype=np.uint8)
 
         try:
-            print("🔍 [Camera] Focusing...")
-            self.picam2.autofocus_cycle()
+            if autofocus:
+                print("🔍 [Camera] Focusing...")
+                self.picam2.autofocus_cycle()
 
             print("📸 [Camera] Capturing image...")
             img = self.picam2.capture_array()
-
-            if img is not None and not img.flags['C_CONTIGUOUS']:
-                print("🔧 [Camera] Fixing memory alignment...")
-                img = np.ascontiguousarray(img)
 
             if img is None:
                 print("❌ [Camera] capture_array returned None.")
@@ -161,8 +165,6 @@ class HighResCamera:
             time.sleep(0.2)
 
             if img is not None:
-                if not img.flags['C_CONTIGUOUS']:
-                    img = np.ascontiguousarray(img)
                 # Print the resolution to the console to verify it matches take_image()
                 print(f"📐 [Camera] Laser image resolution confirmed: {img.shape[1]}x{img.shape[0]}")
             return img
@@ -177,137 +179,127 @@ class HighResCamera:
                 pass
             return None
 
-    def get_laser_location(self):
-        img = HighResCamera().take_laser_image()
-        cv2.imwrite("try.jpg", img)
-        gsd = Gsd(camera_params=camera_params)
-        img = gsd.warp_table_exact(img)
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    def get_laser_location(self, num_captures=3):
+        """
+        Find laser location by capturing multiple images in each state and averaging them.
+        This reduces noise and improves detection accuracy.
+        
+        Args:
+            num_captures: Number of images to capture in each state (laser on/off). Default 3.
+        """
+        print(f"📸 [Laser] Capturing {num_captures} images with laser ON...")
+        grabber_lazer(True)
+        laser_on_images = []
+        for i in range(num_captures):
+            img = self.take_image(autofocus=(i == 0))  # Autofocus only on first capture
+            if img is not None:
+                laser_on_images.append(img)
+                print(f"   ✅ Laser ON image {i+1}/{num_captures}")
+            else:
+                print(f"   ❌ Failed to capture laser ON image {i+1}/{num_captures}")
 
-        # 2. Define the bounds for the color red.
-        # In OpenCV, Hue goes from 0 to 179.
-        # Red is tricky because it sits at the very edge of the Hue circle,
-        # meaning it wraps around from 170-179 back to 0-10.
+        if not laser_on_images:
+            print("❌ [Laser] No images captured with laser ON")
+            return None
 
-        # Lower red range (Hue 0 to 10)
-        lower_red_1 = np.array([0, 120, 70])
+        print(f"📸 [Laser] Capturing {num_captures} images with laser OFF...")
+        grabber_lazer(False)
+        laser_off_images = []
+        for i in range(num_captures):
+            img = self.take_image(autofocus=False)
+            if img is not None:
+                laser_off_images.append(img)
+                print(f"   ✅ Laser OFF image {i+1}/{num_captures}")
+            else:
+                print(f"   ❌ Failed to capture laser OFF image {i+1}/{num_captures}")
+
+        if not laser_off_images:
+            print("❌ [Laser] No images captured with laser OFF")
+            return None
+
+        # Average images in each state to reduce noise
+        print("🔄 [Laser] Averaging images to reduce noise...")
+        img_laser_on_avg = np.mean(laser_on_images, axis=0).astype(np.uint8)
+        img_laser_off_avg = np.mean(laser_off_images, axis=0).astype(np.uint8)
+        print(f"   ✅ Averaged {len(laser_on_images)} ON images and {len(laser_off_images)} OFF images")
+
+        # Compute difference on averaged images
+        img_diff = cv2.absdiff(img_laser_on_avg, img_laser_off_avg)
+        
+        # Convert difference image to HSV for red color detection
+        img_diff_hsv = cv2.cvtColor(img_diff, cv2.COLOR_BGR2HSV)
+        cv2.imwrite("img_diff_hsv.jpg", img_diff_hsv)
+
+        
+        # Define red color ranges in HSV (red wraps around hue circle)
+        lower_red_1 = np.array([0, 100, 100])
         upper_red_1 = np.array([10, 255, 255])
-
-        # Upper red range (Hue 170 to 180)
-        lower_red_2 = np.array([170, 50, 30])
+        lower_red_2 = np.array([170, 100, 100])
         upper_red_2 = np.array([180, 255, 255])
-
-        # 3. Create masks for both red ranges
-        mask1 = cv2.inRange(hsv, lower_red_1, upper_red_1)
-        mask2 = cv2.inRange(hsv, lower_red_2, upper_red_2)
-
-        # 4. Combine the two masks (Pixel is red if it's in mask1 OR mask2)
-        final_red_mask = cv2.bitwise_or(mask1, mask2)
-
-        # 5. Apply the mask to the original image
-        # This keeps original pixel colors where the mask is white (255)
-        # and turns them black (0) where the mask is black.
-        red_only_image = cv2.bitwise_and(img, img, mask=final_red_mask)
-
-        contours, _ = cv2.findContours(final_red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.imwrite("laser_mask1.jpg", final_red_mask)
-        print("saved")
-        # If the image is completely black (no laser detected)
+        
+        # Create masks for both red ranges
+        mask1 = cv2.inRange(img_diff_hsv, lower_red_1, upper_red_1)
+        mask2 = cv2.inRange(img_diff_hsv, lower_red_2, upper_red_2)
+        red_mask = cv2.bitwise_or(mask1, mask2)
+        
+        # Find contours of red areas
+        contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
         if not contours:
-            print("⚠️ [Laser] No light sources detected in the image.")
-            return None
+            print("⚠️ [Laser] No red laser detected in difference image.")
+            # Fallback: find brightest point
+            img_gray = cv2.cvtColor(img_diff, cv2.COLOR_BGR2GRAY)
+            _, max_val, _, max_loc = cv2.minMaxLoc(img_gray)
+            if max_val < 10:
+                return None
+            center_x, center_y = max_loc
+            print(f"✅ [Laser] Using fallback brightness detection at ({center_x}, {center_y})")
+        else:
+            # Find largest red contour (the laser spot)
+            largest_contour = max(contours, key=cv2.contourArea)
+            
+            # Calculate center using moments
+            M = cv2.moments(largest_contour)
+            if M["m00"] == 0:
+                print("⚠️ [Laser] Could not compute laser center.")
+                return None
+            
+            center_x = int(M["m10"] / M["m00"])
+            center_y = int(M["m01"] / M["m00"])
+            print(f"✅ [Laser] Detected RED laser at ({center_x}, {center_y}) [averaged from {len(laser_on_images)} captures]")
+        
+        # Create annotated image showing laser location on the averaged laser-on image
+        img_annotated = img_laser_on_avg.copy()
+        marker_color = (0, 0, 255)  # Red in BGR
+        
+        # Draw circle and crosshair
+        cv2.circle(img_annotated, (center_x, center_y), radius=40, color=marker_color, thickness=3)
+        cv2.drawMarker(img_annotated, (center_x, center_y), color=marker_color,
+                       markerType=cv2.MARKER_CROSS, markerSize=60, thickness=2)
+        
+        # Add text with coordinates
+        text = f"RED Laser: ({center_x}, {center_y})"
+        cv2.putText(img_annotated, text, (center_x + 50, center_y - 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, marker_color, 3)
 
-        # 2. Find the largest contour (assuming the laser is the biggest bright spot)
-        largest_contour = max(contours, key=cv2.contourArea)
-
-
-
-
-        # 3. Calculate the center of the shape using "Image Moments"
-        # Moments are just a mathematical way to find the center of mass of a cluster of pixels
-        M = cv2.moments(largest_contour)
-
-        # Prevent division by zero (happens if the contour is somehow a single pixel line)
-        if M["m00"] == 0:
-            return None
-
-        # Calculate the exact x and y coordinates
-        center_x = int(M["m10"] / M["m00"])
-        center_y = int(M["m01"] / M["m00"])
-
-        # annotate point on image
-        # 1. Choose a highly visible color (BGR format). Green: (0, 255, 0)
-        marker_color = (0, 255, 0)
-
-        # 2. Draw a circle around the laser
-        # Arguments: image, center, radius, color, thickness
-        cv2.circle(img, (center_x, center_y), radius=20, color=marker_color, thickness=2)
-
-        # 3. Draw a precise crosshair exactly at the center point
-        # Arguments: image, position, color, markerType, markerSize, thickness
-        cv2.drawMarker(img, (center_x, center_y), color=marker_color,
-                       markerType=cv2.MARKER_CROSS, markerSize=30, thickness=2)
-
-        # 4. (Optional) Add text showing the exact coordinates
-        text = f"Laser: ({center_x}, {center_y})"
-        # Arguments: image, text, bottom-left corner, font, scale, color, thickness
-        cv2.putText(img, text, (center_x + 25, center_y - 25),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, marker_color, 2)
-
-        return (center_x, center_y), img
+        return (center_x, center_y), img_annotated
 
 
 def take_image():
     """Standalone wrapper function for backward compatibility."""
     camera = HighResCamera()
-    img = camera.take_image()
-
-
+    return camera.take_image()
 
 
 if __name__ == "__main__":
-    cord, frame = HighResCamera().get_laser_location()
-    cv2.imwrite("test.jpg", frame)
-    print(f"the lazer location is {cord}")
-    print("saved")
-    from pathlib import Path
-    ROOT_DIR = Path(__file__).parent.parent
-    H_PATH = ROOT_DIR / "data" / "H_cam_to_arm.npy"
-    
-    H_cam_to_arm = None
-    if H_PATH.exists():
-        H_cam_to_arm = np.load(H_PATH)
-        print(f"✅ Loaded calibration matrix from {H_PATH}")
-    else:
-        print(f"⚠️ Warning: Calibration matrix not found at {H_PATH}")
-
-    def camera_to_arm(cam_x, cam_y):
-        if H_cam_to_arm is None: return (0, 0)
-        pt = np.array([(cam_x, cam_y)], dtype=np.float32).reshape(-1, 1, 2)
-        transformed = cv2.perspectiveTransform(pt, H_cam_to_arm)
-        return (float(transformed[0][0][0]), float(transformed[0][0][1]))
-
     camera = HighResCamera()
     camera.start()
-    image = camera.take_image()
-    if image is not None:
-        cv2.imwrite("test1.jpg", image)
-        gsd = Gsd(camera_params=camera_params)
-        res = gsd.process([image])
-        cv2.imwrite("test2.jpg", res.annotated_image)
-        
-        all_cards = res.open_cards + res.face_down_cards
-        for card in all_cards:
-            cam_x, cam_y = card.center.x, card.center.y
-            if 300 <= cam_y <= 800:
-                label = card.classification.label if card.classification else "Face Down"
-                arm_x, arm_y = camera_to_arm(cam_x, cam_y)
-                move_to((arm_x, arm_y))
-                grab()
-                move_to((-10, 10))
-                grabber_release()
-                print(f"🃏 {label}:")
-                print(f"   Camera: ({cam_x:.1f}, {cam_y:.1f})")
-                print(f"   Arm:    ({arm_x:.2f}, {arm_y:.2f})")
+    result = camera.get_laser_location()
+    if result:
+        (laser_x, laser_y), annotated_img = result
+        cv2.imwrite("laser_location.jpg", annotated_img)
+        print(f"✅ Laser location saved: ({laser_x}, {laser_y})")
+    else:
+        print("❌ Failed to detect laser.")
     camera.stop()
 
